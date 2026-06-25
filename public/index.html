@@ -18,6 +18,7 @@
         <a href="#routing">Routing</a>
         <a href="#runes">Runes</a>
         <a href="#mimir">Mímir</a>
+        <a href="#loom">Loom</a>
         <a href="#quickstart">Quickstart</a>
       </div>
     </nav>
@@ -84,6 +85,13 @@
           <p>The ORM. Your <code>db:</code>-tagged structs are a shape; Mímir
           remembers them as rows and migrates them at startup.
           <code>mimir.odin</code> · <code>postgres.odin</code></p>
+        </article>
+        <article class="card">
+          <div class="rune">ᛚ</div>
+          <h3>Loom, the templates</h3>
+          <p>The templating engine. A template is the warp strung on the loom;
+          <code>weave</code> runs your data through it as the weft to produce
+          HTML. A Jinja dialect, HTML-escaped by default. <code>loom.odin</code></p>
         </article>
       </div>
     </section>
@@ -273,8 +281,76 @@ gh.remember(app, Sample)</pre>
 gh.hail(&amp;app, <span class="s">"/static"</span>, <span class="s">"./public"</span>)</pre>
     </section>
 
+    <!-- LOOM -->
+    <section id="loom">
+      <div class="section-head">
+        <span class="kicker">The Norns weave the threads of fate</span>
+        <h2>Loom — the templating engine</h2>
+      </div>
+      <p class="prose">
+        At the well of Urðr the Norns weave the threads of fate; so here a
+        template is the <strong>warp</strong> already strung on the loom, and
+        <code>weave</code> runs the <strong>weft</strong> of your data through it
+        to produce the finished cloth — HTML. The dialect is Jinja's, pared to its
+        load-bearing parts: output an expression, pipe it through filters, branch
+        with <code>if</code>, and iterate with <code>for</code>.
+      </p>
+
+      <pre class="code"><span class="c">&lt;!-- A template: the warp strung on the loom --&gt;</span>
+&lt;h1&gt;{{ title | upper }}&lt;/h1&gt;
+{% <span class="k">if</span> user %}&lt;p&gt;Welcome, {{ user.name }}.&lt;/p&gt;{% <span class="k">else</span> %}&lt;p&gt;Hail, stranger.&lt;/p&gt;{% endif %}
+&lt;ul&gt;
+{% <span class="k">for</span> n <span class="k">in</span> norns %}  &lt;li&gt;{{ loop.index }}. {{ n | capitalize }}&lt;/li&gt;
+{% <span class="k">else</span> %}  &lt;li&gt;the threads are cut&lt;/li&gt;
+{% endfor %}&lt;/ul&gt;</pre>
+
+      <div class="verb-table">
+        <div class="verb"><b>{{ expr }}</b><span>output</span><em>render an expression, HTML-escaped by default</em></div>
+        <div class="verb"><b>| filter</b><span>pipeline</span><em>upper · lower · capitalize · default · join · length · first · last · safe</em></div>
+        <div class="verb"><b>{% if %}</b><span>branch</span><em>if / elif / else / endif</em></div>
+        <div class="verb"><b>{% for %}</b><span>iterate</span><em>for x in xs … else (empty case) … endfor, with a loop binding</em></div>
+        <div class="verb"><b>{# … #}</b><span>comment</span><em>dropped before rendering</em></div>
+      </div>
+
+      <p class="prose">
+        Inside a <code>for</code>, a <code>loop</code> binding carries
+        <code>index</code> / <code>index0</code> / <code>first</code> /
+        <code>last</code> / <code>length</code>, as in Jinja. You thread the
+        context with <code>warp</code> (named values) and <code>list</code>
+        (iterables), then weave:
+      </p>
+      <pre class="code">ctx := gh.warp(
+    {<span class="s">"title"</span>, <span class="s">"Gjallarhorn"</span>},
+    {<span class="s">"user"</span>, gh.warp({<span class="s">"name"</span>, <span class="s">"Heimdallr"</span>})},
+    {<span class="s">"norns"</span>, gh.list(<span class="s">"urd"</span>, <span class="s">"verdandi"</span>, <span class="s">"skuld"</span>)},
+)
+html, _ := gh.weave(src, ctx)     <span class="c">// string in, woven HTML out</span></pre>
+
+      <p class="prose">
+        From a handler, <code>render</code> loads a template file, weaves a context
+        through it, and sends it as HTML. Or mount a whole directory with the
+        four-arg <code>hail</code>: a <code>Provider</code> builds the context fresh
+        per request, so it can read the path, params, or the well.
+      </p>
+      <pre class="code"><span class="c">// One file, one context, sent as text/html.</span>
+gh.render(b, <span class="s">"./templates/hello.html"</span>, ctx)
+
+<span class="c">// Mount ./templates at /pages; GET /pages/x.html weaves templates/x.html.</span>
+gh.hail(&amp;app, <span class="s">"/pages"</span>, <span class="s">"./templates"</span>, provider)</pre>
+
+      <div class="note">
+        <strong>XSS is the checkpoint.</strong> Every <code>{{ … }}</code> is
+        HTML-escaped unless its filter pipeline ends in <code>| safe</code> (or
+        <code>| escape</code>, which escapes then marks safe). The decision rides
+        alongside each value as it's evaluated, so it's made per output, never
+        globally. Template path is supplied by the handler, not the request — the
+        user-path traversal checkpoint lives over in <code>hail</code>'s static
+        mounts.
+      </div>
+    </section>
+
     <!-- QUICKSTART -->
-    <section id="quickstart">
+    <section id="quickstart" class="alt">
       <div class="section-head">
         <span class="kicker">The whole ceremony</span>
         <h2>Quickstart</h2>

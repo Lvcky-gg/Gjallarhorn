@@ -1,0 +1,34 @@
+# docker-compose.yml — a Postgres for testing Mímir, gjallarhorn's ORM.
+#
+# Mímir's from-scratch wire-protocol client (gjallarhorn/postgres.odin) speaks
+# trust / cleartext / md5, but NOT SCRAM yet — while a stock Postgres defaults
+# to scram-sha-256 (and even an `md5` pg_hba line silently upgrades to SCRAM
+# when the stored password is scram). To stay simple and reliable for a local
+# test database, this uses trust auth: POSTGRES_HOST_AUTH_METHOD=trust makes
+# pg_hba.conf authenticate host connections with no password, which Mímir's
+# AuthenticationOk path handles directly.
+#
+# Usage:
+#   docker compose up -d        # Postgres on localhost:5432
+#   odin run .                  # app connects, auto-migrates, serves :8091
+#   docker compose down         # stop + remove (data is ephemeral)
+#
+# Database/user match the Postgres_Config in main.odin (password is ignored
+# under trust auth, but kept so md5 setups also work).
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: gjallarhorn-db
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: gjallarhorn
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d gjallarhorn"]
+      interval: 2s
+      timeout: 3s
+      retries: 20

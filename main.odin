@@ -3,6 +3,7 @@ package main
 import gh "gjallarhorn"
 import "sample"
 
+//name the ORM Mimir
 main :: proc() {
 	app := gh.new(gh.Config{port = 8091, root = "/", db_type = .Postgres})
 

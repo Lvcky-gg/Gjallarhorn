@@ -28,11 +28,12 @@ Config :: struct {
 
 App :: struct {
 	port:       int,
+	db_type:    DB_Type, // dialect Mimir speaks; see mimir.odin
 	routes:     [dynamic]Route,
 	middleware: [dynamic]Middleware,
 	statics:    [dynamic]Static_Mount,
 }
 
 new :: proc(cfg: Config) -> App {
-	return App{port = cfg.port}
+	return App{port = cfg.port, db_type = cfg.db_type}
 }

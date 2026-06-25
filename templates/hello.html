@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>{{ title }}</title></head>
+<body>
+  <h1>{{ title }}</h1>
+  <p>Hail, {{ user.name }}{% if user.admin %} <strong>(admin)</strong>{% endif %}.</p>
+
+  {% if items %}
+  <p>The well remembers {{ items | length }} threads:</p>
+  <ol>
+  {% for item in items %}
+    <li>#{{ loop.index }} — {{ item | upper }}{% if loop.last %} (last){% endif %}</li>
+  {% endfor %}
+  </ol>
+  {% else %}
+  <p>Nothing woven yet.</p>
+  {% endif %}
+
+  <footer>{{ tagline | default("woven by loom") }}</footer>
+</body>
+</html>

@@ -200,6 +200,63 @@ sql_type :: proc(d: DB_Type, id: typeid) -> string {
 }
 
 // ---------------------------------------------------------------------------
+// remember / migrate — schema, derived from your models, applied for you
+// ---------------------------------------------------------------------------
+//
+// The "auto-magic": you never write a CREATE TABLE. You hand Mímir your model
+// types once with `remember`, and `migrate` carves every one of them. `run`
+// calls `migrate` at startup, so defining a tagged struct and remembering it is
+// the whole ceremony — the table follows from the shape.
+
+// remember: register one or more model types so Mímir migrates them at startup.
+// Call it from your package's register proc, e.g. remember(app, Sample, User).
+remember :: proc(app: ^App, models: ..typeid) {
+	for m in models {
+		append(&app.models, m)
+	}
+}
+
+// schema_sql concatenates the CREATE TABLE DDL for every remembered model, in
+// registration order. Handy for writing a migration file or inspecting it.
+schema_sql :: proc(app: ^App, allocator := context.temp_allocator) -> string {
+	w := well(app)
+	b := strings.builder_make(allocator)
+	for m, i in app.models {
+		if i > 0 {
+			strings.write_string(&b, "\n\n")
+		}
+		strings.write_string(&b, carve(w, m, allocator))
+	}
+	return strings.to_string(b)
+}
+
+// migrate derives and applies the schema for every remembered model. Each table
+// is `CREATE TABLE IF NOT EXISTS`, so re-running is safe. Without a live
+// connection (the deferred phase) it emits the DDL it would execute; once Well
+// grows a socket, swap the print for an exec — the call site here doesn't change.
+migrate :: proc(app: ^App) {
+	if len(app.models) == 0 {
+		return
+	}
+	w := well(app)
+	fmt.printfln("mimir: migrating %d model(s) [%v]", len(app.models), w.dialect)
+	for m in app.models {
+		ddl := carve(w, m)
+		if app.pg.open {
+			// Live connection: run the DDL. CREATE TABLE IF NOT EXISTS is idempotent.
+			if pg_simple(&app.pg, ddl) {
+				fmt.printfln("  ✓ %s", table_name(m))
+			} else {
+				fmt.eprintfln("  ✗ %s (see error above)", table_name(m))
+			}
+		} else {
+			// Offline: print the DDL Mímir would execute.
+			fmt.println(ddl)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
 // offer — INSERT
 // ---------------------------------------------------------------------------
 

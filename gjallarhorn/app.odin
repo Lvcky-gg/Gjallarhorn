@@ -20,20 +20,35 @@ DB_Type :: enum {
 	SQLite,
 }
 
+// Postgres_Config: where Mimir's well actually is. Leave dbname empty to stay
+// offline — migrations then print their DDL instead of executing. host/port
+// default to 127.0.0.1:5432 at connect time. See postgres.odin.
+Postgres_Config :: struct {
+	host:     string,
+	port:     int,
+	user:     string,
+	password: string,
+	dbname:   string,
+}
+
 Config :: struct {
-	port:    int,
-	root:    string,
-	db_type: DB_Type,
+	port:     int,
+	root:     string,
+	db_type:  DB_Type,
+	postgres: Postgres_Config,
 }
 
 App :: struct {
 	port:       int,
-	db_type:    DB_Type, // dialect Mimir speaks; see mimir.odin
+	db_type:    DB_Type,     // dialect Mimir speaks; see mimir.odin
+	postgres:   Postgres_Config,
+	pg:         Pg_Conn,     // live connection; pg.open is false until connect()
+	models:     [dynamic]typeid, // shapes Mimir remembers + migrates at startup
 	routes:     [dynamic]Route,
 	middleware: [dynamic]Middleware,
 	statics:    [dynamic]Static_Mount,
 }
 
 new :: proc(cfg: Config) -> App {
-	return App{port = cfg.port, db_type = cfg.db_type}
+	return App{port = cfg.port, db_type = cfg.db_type, postgres = cfg.postgres}
 }

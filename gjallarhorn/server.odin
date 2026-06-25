@@ -8,6 +8,21 @@ import "core:fmt"
 import "core:strings"
 
 run :: proc(app: ^App) {
+	// If a Postgres database is configured, open the well before serving so
+	// migrations (and handler queries) run against it. Failure is non-fatal:
+	// Mímir falls back to printing DDL so local dev works without a database.
+	if app.postgres.dbname != "" && !app.pg.open {
+		if connect(app) {
+			fmt.printfln("mimir: connected to postgres %s/%s", app.postgres.host, app.postgres.dbname)
+		} else {
+			fmt.eprintln("mimir: postgres unavailable — migrations will print only")
+		}
+	}
+
+	// Auto-migrate: every remembered model's table is derived and applied
+	// before the first request. See mimir.odin.
+	migrate(app)
+
 	endpoint := net.Endpoint {
 		address = net.IP4_Loopback,
 		port    = app.port,

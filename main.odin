@@ -23,7 +23,7 @@ main :: proc() {
 	gh.rune(&app, gh.cors)
 
 	// Serve ./public at /static — a GET that hands back files.
-	gh.hail(&app, "/static", "./public")
+	gh.hail(&app, "/docs", "./public")
 
 	sample.register(&app)
 	gh.run(&app)

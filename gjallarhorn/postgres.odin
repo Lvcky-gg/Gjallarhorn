@@ -55,20 +55,21 @@ disconnect :: proc(app: ^App) {
 
 // exec runs a statement and discards any rows, returning ok. For INSERT /
 // UPDATE / DELETE built by offer / amend / forget.
-exec :: proc(app: ^App, stmt: Statement) -> bool {
-	if !app.pg.open {
+exec :: proc(w: Well, stmt: Statement) -> bool {
+	if w.app == nil || !w.app.pg.open {
 		return false
 	}
-	_, ok := pg_query(&app.pg, stmt.sql, stmt.args[:], context.temp_allocator)
+	_, ok := pg_query(&w.app.pg, stmt.sql, stmt.args[:], context.temp_allocator)
 	return ok
 }
 
-// query runs a statement and returns its rows. For recall(...).sql.
-query :: proc(app: ^App, stmt: Statement, allocator := context.temp_allocator) -> (Pg_Rows, bool) {
-	if !app.pg.open {
+// query runs a statement and returns its rows. For recall(...).sql — and for
+// offer(...), whose Postgres form carries RETURNING.
+query :: proc(w: Well, stmt: Statement, allocator := context.temp_allocator) -> (Pg_Rows, bool) {
+	if w.app == nil || !w.app.pg.open {
 		return {}, false
 	}
-	return pg_query(&app.pg, stmt.sql, stmt.args[:], allocator)
+	return pg_query(&w.app.pg, stmt.sql, stmt.args[:], allocator)
 }
 
 // ---------------------------------------------------------------------------

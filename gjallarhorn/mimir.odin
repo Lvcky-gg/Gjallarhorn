@@ -26,10 +26,13 @@ import "core:fmt"
 import "core:strings"
 import "core:reflect"
 
-// Well — a handle bound to one dialect. Today it is just the dialect; tomorrow
-// it grows a socket/pool. Draw one from the app with `well`.
+// Well — the handle through which Mímir works: a dialect for building SQL plus
+// the app whose live connection (App.pg) runs it. Building procs (carve, offer,
+// recall…) only need the dialect; exec / query reach through `app`. Draw one
+// with `well`.
 Well :: struct {
 	dialect: DB_Type,
+	app:     ^App, // nil when only building SQL; required to exec/query
 }
 
 // well: draw a Well speaking the dialect chosen in Config. Take it from the app
@@ -38,11 +41,11 @@ Well :: struct {
 well :: proc{well_from_app, well_from_bifrost}
 
 well_from_app :: proc(app: ^App) -> Well {
-	return Well{dialect = app.db_type}
+	return Well{dialect = app.db_type, app = app}
 }
 
 well_from_bifrost :: proc(b: ^Bifrost) -> Well {
-	return Well{dialect = b._app.db_type}
+	return Well{dialect = b._app.db_type, app = b._app}
 }
 
 // Statement — generated SQL and the arguments that fill its placeholders, in

@@ -47,6 +47,7 @@ App :: struct {
 	routes:     [dynamic]Route,
 	middleware: [dynamic]Middleware,
 	statics:    [dynamic]Static_Mount,
+	looms:      [dynamic]Loom_Mount, // template dirs served + woven by hail
 }
 
 new :: proc(cfg: Config) -> App {

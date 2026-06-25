@@ -82,6 +82,18 @@ warp :: proc(bindings: ..Binding, allocator := context.allocator) -> Warp {
 	return m
 }
 
+// list: thread an iterable for `{% for %}`, e.g.
+//   gh.list("urd", "verdandi", "skuld")
+// Copies the values into `allocator`-owned memory. Prefer this over a raw
+// `[]Value{…}` literal when the result outlives the call (e.g. returned from a
+// Provider): a slice literal's backing array lives on the stack and dangles
+// once the enclosing scope returns.
+list :: proc(vals: ..Value, allocator := context.allocator) -> []Value {
+	out := make([]Value, len(vals), allocator)
+	copy(out, vals)
+	return out
+}
+
 // weave: run `ctx` through template source `src`, returning the woven text in
 // `allocator`. The string-in / string-out core; `render` layers file loading
 // and the HTTP response on top.
@@ -123,6 +135,64 @@ render :: proc(b: ^Bifrost, path: string, ctx: Warp) {
 		return
 	}
 	html(b, 200, out)
+}
+
+// ---------------------------------------------------------------------------
+// Serving a directory of templates through hail
+// ---------------------------------------------------------------------------
+
+// Provider builds the context for a hail-served template, fresh per request, so
+// it can read b.path / params / the database. Build the Warp in
+// context.temp_allocator — the request frees it after the response.
+Provider :: proc(b: ^Bifrost) -> Warp
+
+// Loom_Mount: serve `dir` under `url_prefix`, weaving each file through Loom
+// with the context `provider` returns. The template-rendering sibling of
+// Static_Mount (static.odin). Register with `hail` (its four-arg form).
+Loom_Mount :: struct {
+	url_prefix: string,
+	dir:        string,
+	provider:   Provider, // may be nil -> rendered with an empty context
+}
+
+// hail_loom: the four-arg `hail` — mount a template directory. A request under
+// `url_prefix` resolves to a file in `dir`, which is woven and sent as HTML,
+// e.g. hail(&app, "/pages", "./templates", provider) maps GET /pages/x.html to
+// templates/x.html.
+hail_loom :: proc(app: ^App, url_prefix: string, dir: string, provider: Provider) {
+	append(&app.looms, Loom_Mount{url_prefix = url_prefix, dir = dir, provider = provider})
+}
+
+// serve_loom resolves a request to a template under the mount, weaves it, and
+// sends it. Returns false (so dispatch can 404) when the file is missing. Path
+// traversal is clamped by safe_target, the same checkpoint serve_static uses.
+serve_loom :: proc(b: ^Bifrost, mount: Loom_Mount) -> bool {
+	target, within := safe_target(mount.dir, mount.url_prefix, b.path)
+	if !within {
+		text(b, 403, "403 forbidden")
+		return true
+	}
+	if os.is_directory(target) {
+		text(b, 403, "403 forbidden")
+		return true
+	}
+
+	data, err := os.read_entire_file(target, context.temp_allocator)
+	if err != nil {
+		return false // not found — let dispatch_route 404 it
+	}
+
+	ctx: Warp
+	if mount.provider != nil {
+		ctx = mount.provider(b)
+	}
+	out, werr := weave(string(data), ctx, context.temp_allocator)
+	if werr != .None {
+		text(b, 500, "template error")
+		return true
+	}
+	html(b, 200, out)
+	return true
 }
 
 // ---------------------------------------------------------------------------

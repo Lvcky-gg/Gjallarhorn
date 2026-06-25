@@ -22,23 +22,26 @@ main :: proc() {
 	gh.rune(&app, gh.logger)
 	gh.rune(&app, gh.cors)
 
-	// Serve ./public at /static — a GET that hands back files.
+	// Serve ./public at /docs — a GET that hands back raw files.
 	gh.hail(&app, "/docs", "./public")
 
-	// Loom: render an HTML template (templates/hello.html) through a context.
-	gh.get(&app, "/loom", loom_demo)
+	// Serve ./templates at /pages, woven by Loom. GET /pages/hello.html renders
+	// templates/hello.html through the context loom_context builds per request.
+	gh.hail(&app, "/pages", "./templates", loom_context)
 
 	sample.register(&app)
 	gh.run(&app)
 }
 
-// loom_demo weaves templates/hello.html. `warp` threads the context; nested
-// objects are just nested `warp`s, lists are []gh.Value. Output is
-// HTML-escaped by default — the title below proves it.
-loom_demo :: proc(b: ^gh.Bifrost) {
-	gh.render(b, "templates/hello.html", gh.warp(
+// loom_context threads the context for templates under /pages. Built fresh per
+// request in temp memory; `warp` nests (objects are warps, lists are []Value).
+// Output is HTML-escaped by default — the title below proves it.
+loom_context :: proc(b: ^gh.Bifrost) -> gh.Warp {
+	return gh.warp(
 		{"title", "Gjallarhorn <Loom>"},
-		{"user", gh.warp({"name", "Heimdallr"}, {"admin", true})},
-		{"items", []gh.Value{"urd", "verdandi", "skuld"}},
-	))
+		{"user", gh.warp({"name", "Heimdallr"}, {"admin", true}, allocator = context.temp_allocator)},
+		{"items", gh.list("urd", "verdandi", "skuld", allocator = context.temp_allocator)},
+		{"path", b.path},
+		allocator = context.temp_allocator,
+	)
 }

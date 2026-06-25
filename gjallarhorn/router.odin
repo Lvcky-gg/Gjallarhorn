@@ -61,8 +61,16 @@ dispatch_route :: proc(b: ^Bifrost) {
 		}
 	}
 
-	// Static mounts (GET only). First mount whose prefix matches handles it.
+	// Mounts (GET only). First mount whose prefix matches handles it; template
+	// mounts are tried before raw static ones.
 	if b.method == .Get {
+		for mount in b._app.looms {
+			if under_prefix(b.path, mount.url_prefix) {
+				if serve_loom(b, mount) {
+					return
+				}
+			}
+		}
 		for mount in b._app.statics {
 			if under_prefix(b.path, mount.url_prefix) {
 				if serve_static(b, mount) {

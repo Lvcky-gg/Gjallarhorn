@@ -22,8 +22,8 @@ main :: proc() {
 	gh.rune(&app, gh.logger)
 	gh.rune(&app, gh.cors)
 
-	// Serve ./public at /docs — a GET that hands back raw files.
-	gh.hail(&app, "/docs", "./public")
+	// Serve ./docs at /docs — a GET that hands back raw files.
+	gh.hail(&app, "/docs", "./docs")
 
 	// Serve ./templates at /pages, woven by Loom. GET /pages/hello.html renders
 	// templates/hello.html through the context loom_context builds per request.

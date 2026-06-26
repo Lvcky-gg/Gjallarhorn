@@ -61,8 +61,13 @@ body_large_roundtrip :: proc(t: ^testing.T) {
 	_, serr := net.send_tcp(client, transmute([]u8)req)
 	testing.expect(t, serr == nil, "send should succeed")
 
-	b, status, rok := gh.recv_request(server, 1 << 20, context.temp_allocator)
+	conn := gh.Conn {
+		socket = server,
+		buf    = make([dynamic]u8, context.temp_allocator),
+	}
+	b, _, status, rok, closed := gh.read_request(&conn, 1 << 20)
 	testing.expect(t, rok, "request should parse")
+	testing.expect(t, !closed)
 	testing.expect_value(t, status, 0)
 	testing.expect_value(t, len(b.body), len(payload))
 	testing.expect_value(t, b.body_text, payload)
@@ -85,7 +90,11 @@ body_over_limit_413 :: proc(t: ^testing.T) {
 	_, _ = net.send_tcp(client, transmute([]u8)req)
 
 	// max_body below the declared Content-Length -> rejected, no body read.
-	_, status, rok := gh.recv_request(server, 1024, context.temp_allocator)
+	conn := gh.Conn {
+		socket = server,
+		buf    = make([dynamic]u8, context.temp_allocator),
+	}
+	_, _, status, rok, _ := gh.read_request(&conn, 1024)
 	testing.expect(t, !rok, "oversized body should be rejected")
 	testing.expect_value(t, status, 413)
 }

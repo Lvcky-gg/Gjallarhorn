@@ -17,7 +17,11 @@ write_response :: proc(b: ^Bifrost, status: int, content_type: string, body: str
 		fmt.sbprintf(&sb, "%s: %s\r\n", key, value)
 	}
 	fmt.sbprintf(&sb, "Content-Length: %d\r\n", len(body))
-	fmt.sbprint(&sb, "Connection: close\r\n\r\n")
+	if b.keep_alive {
+		fmt.sbprint(&sb, "Connection: keep-alive\r\n\r\n")
+	} else {
+		fmt.sbprint(&sb, "Connection: close\r\n\r\n")
+	}
 	fmt.sbprint(&sb, body)
 
 	net.send_tcp(b.client, transmute([]u8)strings.to_string(sb))

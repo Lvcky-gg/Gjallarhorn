@@ -72,6 +72,7 @@ URL (`POST /sample/:name`) purely to work around this.
 **Problem:** Every response sends `Connection: close`; one request per socket.
 **Depends on:** GH-002 (need framed reads to know where one request ends).
 **Done when:** honors `Connection: keep-alive` on HTTP/1.1, loops multiple requests per socket, with an idle timeout. Falls back to close on `Connection: close`.
+**DONE**
 
 ---
 

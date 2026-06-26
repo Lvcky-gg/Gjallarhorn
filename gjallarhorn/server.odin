@@ -1,12 +1,14 @@
 package gjallarhorn
 
 // server.odin — the socket loop: listen, accept, read, parse the request line,
-// then hand the Bifrost to the rune chain.
+// then hand the Bifrost to the rune chain. Connections are kept alive and
+// reused across requests per RFC 7230 (see handle_connection).
 
 import "core:net"
 import "core:fmt"
 import "core:strings"
 import "core:strconv"
+import "core:time"
 
 run :: proc(app: ^App) {
 
@@ -47,57 +49,83 @@ run :: proc(app: ^App) {
 }
 
 
-READ_CHUNK :: 4096   // bytes pulled per recv
-MAX_HEADER :: 64 * 1024 // upper bound on the request + header block
+READ_CHUNK :: 4096            // bytes pulled per recv
+MAX_HEADER :: 64 * 1024       // upper bound on the request + header block
+IDLE_TIMEOUT :: 15 * time.Second // how long a kept-alive socket may sit idle
 
-handle_connection :: proc(app: ^App, client: net.TCP_Socket) {
-	b, status, ok := recv_request(client, app.max_body, context.temp_allocator)
-	if !ok {
-		send_raw(client, status, fmt.tprintf("%d %s", status, status_text(status)))
-		return
-	}
-	b._app = app
-	next(&b)
+// Conn wraps a client socket with a persistent read buffer. The buffer holds
+// bytes already pulled off the socket but not yet consumed, so a request that
+// arrives in the same packet as its predecessor (pipelining) is not lost when
+// the connection is reused.
+Conn :: struct {
+	socket: net.TCP_Socket,
+	buf:    [dynamic]u8,
 }
 
-// recv_request reads and parses a complete HTTP request: the request line, the
-// header block, and a body sized by Content-Length (read across as many TCP
-// segments as it takes). On a protocol error it returns ok=false plus the HTTP
-// status the caller should send back (400, or 413 when the body exceeds
-// max_body). The returned Bifrost has no `_app`; the caller wires that.
-recv_request :: proc(
-	client: net.TCP_Socket,
+handle_connection :: proc(app: ^App, client: net.TCP_Socket) {
+	// An idle keep-alive socket must not pin the (single-threaded) accept loop
+	// forever; recv then fails once the timeout elapses and we close.
+	net.set_option(net.Any_Socket(client), .Receive_Timeout, IDLE_TIMEOUT)
+
+	conn := Conn {
+		socket = client,
+		buf    = make([dynamic]u8),
+	}
+	defer delete_dynamic_array(conn.buf) // builtin; package `delete` is the route verb
+
+	for {
+		b, consumed, status, ok, closed := read_request(&conn, app.max_body)
+		if closed {
+			return // idle timeout, EOF, or a truncated request
+		}
+		if !ok {
+			send_raw(client, status, fmt.tprintf("%d %s", status, status_text(status)))
+			return
+		}
+
+		b._app = app
+		next(&b)
+		keep := b.keep_alive
+
+		// Drop this request's bytes; anything after belongs to the next one.
+		conn_consume(&conn, consumed)
+		free_all(context.temp_allocator)
+
+		if !keep {
+			return
+		}
+	}
+}
+
+// read_request ensures conn.buf holds one complete HTTP request, parses it, and
+// reports how many bytes that request consumed (the caller drops them once the
+// response is sent — b.body points into conn.buf until then). On a protocol
+// error it returns ok=false plus the status to send (400, or 413 when the body
+// exceeds max_body). closed=true means the peer hung up or went idle: stop.
+read_request :: proc(
+	conn: ^Conn,
 	max_body: int,
-	allocator := context.allocator,
+	allocator := context.temp_allocator,
 ) -> (
 	b: Bifrost,
+	consumed: int,
 	status: int,
 	ok: bool,
+	closed: bool,
 ) {
-	acc := make([dynamic]u8, allocator)
-	chunk: [READ_CHUNK]u8
-
-	// Phase 1: read until the blank line that terminates the header block.
-	header_end := -1
-	for {
-		n, recv_err := net.recv_tcp(client, chunk[:])
-		if recv_err != nil || n == 0 {
-			break
+	// Phase 1: buffer the request + header block, up to the blank line.
+	header_end := strings.index(string(conn.buf[:]), "\r\n\r\n")
+	for header_end < 0 {
+		if len(conn.buf) > MAX_HEADER {
+			return {}, 0, 400, false, false
 		}
-		append(&acc, ..chunk[:n])
-		if idx := strings.index(string(acc[:]), "\r\n\r\n"); idx >= 0 {
-			header_end = idx
-			break
+		if !conn_fill(conn) {
+			return {}, 0, 0, false, true
 		}
-		if len(acc) > MAX_HEADER {
-			return {}, 400, false
-		}
-	}
-	if header_end < 0 {
-		return {}, 400, false
+		header_end = strings.index(string(conn.buf[:]), "\r\n\r\n")
 	}
 
-	head := string(acc[:header_end])
+	head := string(conn.buf[:header_end])
 
 	// Request line: METHOD SP TARGET SP HTTP/1.1
 	line_end := strings.index(head, "\r\n")
@@ -106,12 +134,13 @@ recv_request :: proc(
 	}
 	parts := strings.split(head[:line_end], " ", allocator)
 	if len(parts) < 2 {
-		return {}, 400, false
+		return {}, 0, 400, false, false
 	}
 	method, method_ok := parse_method(parts[0])
 	if !method_ok {
-		return {}, 400, false
+		return {}, 0, 400, false, false
 	}
+	version := len(parts) >= 3 ? parts[2] : ""
 
 	// Split the target into path (used for routing) and query string. The
 	// query reuses the urlencoded decoder, since the syntax is the same.
@@ -127,36 +156,33 @@ recv_request :: proc(
 	if line_end + 2 <= len(head) {
 		hdrs, hok := parse_headers(head[line_end + 2:], allocator)
 		if !hok {
-			return {}, 400, false
+			return {}, 0, 400, false, false
 		}
 		req_headers = hdrs
 	}
 
-	// Phase 2: body. Content-Length tells us how many bytes to expect; absent
-	// it, the body is whatever already arrived alongside the headers.
+	// Phase 2: body, framed by Content-Length. Absent it (e.g. a GET), there
+	// is no body — we must not swallow a pipelined follow-up request.
 	body_start := header_end + 4
-	content_length := len(acc) - body_start
+	content_length := 0
 	if cl, has_cl := req_headers["content-length"]; has_cl {
 		parsed, pok := strconv.parse_int(strings.trim_space(cl))
 		if !pok || parsed < 0 {
-			return {}, 400, false
+			return {}, 0, 400, false, false
 		}
 		content_length = parsed
 	}
 	if content_length > max_body {
-		return {}, 413, false
+		return {}, 0, 413, false, false
 	}
 
-	for len(acc) - body_start < content_length {
-		n, recv_err := net.recv_tcp(client, chunk[:])
-		if recv_err != nil || n == 0 {
-			break // client closed early; hand back what we have
+	for len(conn.buf) - body_start < content_length {
+		if !conn_fill(conn) {
+			return {}, 0, 0, false, true // truncated body; give up on the socket
 		}
-		append(&acc, ..chunk[:n])
 	}
 
-	end := body_start + min(content_length, len(acc) - body_start)
-	body := acc[body_start:end]
+	body := conn.buf[body_start:body_start + content_length]
 
 	b = Bifrost {
 		method      = method,
@@ -165,7 +191,44 @@ recv_request :: proc(
 		req_headers = req_headers,
 		body        = body,
 		body_text   = string(body),
-		client      = client,
+		client      = conn.socket,
+		keep_alive  = keep_alive_wanted(version, req_headers),
 	}
-	return b, 0, true
+	return b, body_start + content_length, 0, true, false
+}
+
+// conn_fill pulls one chunk off the socket onto conn.buf. Returns false when
+// the peer closed or the idle timeout fired.
+conn_fill :: proc(conn: ^Conn) -> bool {
+	chunk: [READ_CHUNK]u8
+	n, err := net.recv_tcp(conn.socket, chunk[:])
+	if err != nil || n == 0 {
+		return false
+	}
+	append(&conn.buf, ..chunk[:n])
+	return true
+}
+
+// conn_consume drops the first n bytes of conn.buf, sliding the rest down.
+conn_consume :: proc(conn: ^Conn, n: int) {
+	if n >= len(conn.buf) {
+		clear(&conn.buf)
+		return
+	}
+	copy(conn.buf[:], conn.buf[n:])
+	resize(&conn.buf, len(conn.buf) - n)
+}
+
+// keep_alive_wanted applies the HTTP persistence defaults: 1.1 keeps the
+// connection open unless told to close; older versions close unless asked to
+// keep alive.
+keep_alive_wanted :: proc(version: string, headers: map[string]string) -> bool {
+	conn_hdr := ""
+	if v, has := headers["connection"]; has {
+		conn_hdr = strings.to_lower(strings.trim_space(v), context.temp_allocator)
+	}
+	if version == "HTTP/1.1" {
+		return conn_hdr != "close"
+	}
+	return conn_hdr == "keep-alive"
 }

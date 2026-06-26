@@ -18,6 +18,7 @@ Bifrost :: struct {
 	body_text:   string,            // body as a string view
 	client:      net.TCP_Socket,
 	written:     bool,
+	keep_alive:  bool,              // reuse the socket after this response
 
 	// Chain state, driven by `next`. Underscored: not for handler use.
 	_app:      ^App,

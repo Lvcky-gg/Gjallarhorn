@@ -3,14 +3,32 @@ package sample
 import "core:strconv"
 import gh "../gjallarhorn"
 
-// (value, ok) returns, idiomatic Odin error handling.
+// GET /sample/:id — recall a single row by id and hydrate it back into a
+// Sample with Mímir's `scan_one`, rather than echoing a hardcoded value.
 get_handler :: proc(b: ^gh.Bifrost) {
 	id, ok := gh.param_int(b, "id")
 	if !ok {
 		gh.text(b, 400, "id must be an integer")
 		return
 	}
-	gh.json(b, 200, Sample{id = id, name = "thing"})
+
+	w := gh.well(b)
+	q := gh.recall(w, Sample)
+	gh.whose(&q, "id = ?", id)
+	gh.limit(&q, 1)
+
+	rows, qok := gh.query(w, gh.sql(&q))
+	if !qok {
+		gh.text(b, 503, "database unavailable")
+		return
+	}
+
+	row, found := gh.scan_one(rows, Sample)
+	if !found {
+		gh.not_found(b)
+		return
+	}
+	gh.json(b, 200, row)
 }
 
 // POST /sample — create a row from a JSON body, e.g. {"name":"thing"}. Mímir's

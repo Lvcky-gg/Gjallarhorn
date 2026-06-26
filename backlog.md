@@ -117,6 +117,7 @@ parse columns by hand (`create_handler` parses `RETURNING id` from a string).
 - NULL handling defined (zero value or optional).
 - `get_handler` reads a real row from the DB instead of returning a hardcoded `Sample`.
 - Tests against the docker Postgres covering scan of each supported type.
+**DONE**
 
 ### GH-021 · Typed parameter encoding for bind args · **P1** · M
 **Component:** `postgres.odin` (`pg_query` bind loop)

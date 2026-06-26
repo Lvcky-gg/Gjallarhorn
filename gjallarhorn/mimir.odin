@@ -22,7 +22,9 @@ package gjallarhorn
 // checkpoint for this feature is SQL injection: values NEVER reach the SQL
 // string. Every value is a bound parameter ($1.. for Postgres, ? otherwise).
 
+import "base:runtime"
 import "core:fmt"
+import "core:strconv"
 import "core:strings"
 import "core:reflect"
 
@@ -370,6 +372,102 @@ sql :: proc(q: ^Query, allocator := context.temp_allocator) -> Statement {
 		append(&stmt.args, a)
 	}
 	return stmt
+}
+
+// ---------------------------------------------------------------------------
+// Hydration — the read side. `Pg_Rows` comes back as text cells; `scan` maps
+// them onto struct fields by mapped column name (the `db:` tag, else the field
+// name) and converts text to the field's type.
+//
+// Supported field types: int family, f32/f64, bool, string. NULL handling: the
+// driver surfaces a SQL NULL as an empty cell, which converts to the field's
+// zero value (0, false, ""). A column with no matching field is ignored, and a
+// field with no matching column is left zero.
+// ---------------------------------------------------------------------------
+
+// scan hydrates every result row into a freshly allocated []T.
+scan :: proc(rows: Pg_Rows, $T: typeid, allocator := context.temp_allocator) -> []T {
+	out := make([]T, len(rows.rows), allocator)
+
+	// Resolve each result column to its target struct field once, up front.
+	cols := columns_of(T, context.temp_allocator)
+	fields := make([]Maybe(reflect.Struct_Field), len(rows.columns), context.temp_allocator)
+	for name, ci in rows.columns {
+		for c in cols {
+			if c.name == name {
+				fields[ci] = reflect.struct_field_by_name(T, c.field)
+				break
+			}
+		}
+	}
+
+	for row, ri in rows.rows {
+		item: T
+		base := uintptr(rawptr(&item))
+		for cell, ci in row {
+			f, mapped := fields[ci].?
+			if !mapped {
+				continue
+			}
+			set_field(rawptr(base + f.offset), f.type.id, cell, allocator)
+		}
+		out[ri] = item
+	}
+	return out
+}
+
+// scan_one hydrates the first result row, reporting ok=false on an empty set.
+scan_one :: proc(rows: Pg_Rows, $T: typeid, allocator := context.temp_allocator) -> (T, bool) {
+	if len(rows.rows) == 0 {
+		return {}, false
+	}
+	head := Pg_Rows{columns = rows.columns, rows = rows.rows[:1]}
+	return scan(head, T, allocator)[0], true
+}
+
+// set_field writes one text cell into a struct field of the given type. A value
+// that fails to parse (including the empty cell from a NULL) leaves the zero.
+@(private)
+set_field :: proc(ptr: rawptr, id: typeid, text: string, allocator: runtime.Allocator) {
+	switch id {
+	case int:
+		v, _ := strconv.parse_int(text);  (^int)(ptr)^ = v
+	case i64:
+		v, _ := strconv.parse_i64(text);  (^i64)(ptr)^ = v
+	case i32:
+		v, _ := strconv.parse_i64(text);  (^i32)(ptr)^ = i32(v)
+	case i16:
+		v, _ := strconv.parse_i64(text);  (^i16)(ptr)^ = i16(v)
+	case i8:
+		v, _ := strconv.parse_i64(text);  (^i8)(ptr)^ = i8(v)
+	case u64:
+		v, _ := strconv.parse_uint(text); (^u64)(ptr)^ = u64(v)
+	case u32:
+		v, _ := strconv.parse_uint(text); (^u32)(ptr)^ = u32(v)
+	case u16:
+		v, _ := strconv.parse_uint(text); (^u16)(ptr)^ = u16(v)
+	case u8:
+		v, _ := strconv.parse_uint(text); (^u8)(ptr)^ = u8(v)
+	case f64:
+		v, _ := strconv.parse_f64(text);  (^f64)(ptr)^ = v
+	case f32:
+		v, _ := strconv.parse_f32(text);  (^f32)(ptr)^ = v
+	case bool:
+		(^bool)(ptr)^ = parse_pg_bool(text)
+	case string:
+		(^string)(ptr)^ = strings.clone(text, allocator)
+	}
+}
+
+// parse_pg_bool reads Postgres's text boolean ('t'/'f'), tolerating a few
+// common spellings.
+@(private)
+parse_pg_bool :: proc(s: string) -> bool {
+	switch s {
+	case "t", "true", "TRUE", "True", "1", "y", "yes":
+		return true
+	}
+	return false
 }
 
 placeholder :: proc(d: DB_Type, n: int) -> string {

@@ -142,6 +142,7 @@ to a model does nothing to an existing table — no ALTER, no diffing, no versio
 - Detects existing columns (query `information_schema`) and emits `ALTER TABLE ADD COLUMN` for new fields.
 - A migration version/log table or an explicit ordered-migration mechanism.
 - Test: add a field to a model → column appears on next `run()`.
+**DONE**
 
 ### GH-024 · Connection pooling · **P1** · M
 **Component:** `postgres.odin`, `app.odin`

@@ -192,18 +192,95 @@ migrate :: proc(app: ^App) {
 	}
 	w := well(app)
 	fmt.printfln("mimir: migrating %d model(s) [%v]", len(app.models), w.dialect)
+
+	// Offline (no connection): just print the CREATE DDL as before — there's no
+	// live schema to diff against.
+	if !app.pg.open {
+		for m in app.models {
+			fmt.println(carve(w, m))
+		}
+		return
+	}
+
+	ensure_migration_log(&app.pg)
+
 	for m in app.models {
-		ddl := carve(w, m)
-		if app.pg.open {
-			if pg_simple(&app.pg, ddl) {
-				fmt.printfln("  ✓ %s", table_name(m))
-			} else {
-				fmt.eprintfln("  ✗ %s (see error above)", table_name(m))
-			}
+		table := table_name(m)
+
+		// 1. CREATE TABLE IF NOT EXISTS — makes a brand-new table whole.
+		if !pg_simple(&app.pg, carve(w, m)) {
+			fmt.eprintfln("  ✗ %s (create failed, see error above)", table)
+			continue
+		}
+
+		// 2. Diff the model against the live columns and ALTER in the missing
+		//    ones, so adding a field to an existing model takes effect.
+		added := add_missing_columns(app, w, m, table)
+		fmt.printfln("  ✓ %s (+%d column(s))", table, added)
+	}
+}
+
+// add_missing_columns brings an existing table up to the model's shape: any
+// mapped field with no matching column gets an `ALTER TABLE ... ADD COLUMN`.
+// New columns are nullable — backfilling a NOT NULL on a populated table needs
+// a default, which is out of scope here. Auto/serial columns are skipped: they
+// belong to CREATE TABLE, not a later ALTER. Returns the number added.
+add_missing_columns :: proc(app: ^App, w: Well, T: typeid, table: string) -> int {
+	existing := existing_columns(&app.pg, table)
+	added := 0
+	for col in columns_of(T) {
+		if col.auto || col.name in existing {
+			continue
+		}
+		alter := fmt.tprintf(
+			"ALTER TABLE %s ADD COLUMN %s %s;",
+			table, col.name, sql_type(w.dialect, col.type_id),
+		)
+		if pg_simple(&app.pg, alter) {
+			log_migration(&app.pg, fmt.tprintf("add_column:%s.%s", table, col.name))
+			added += 1
 		} else {
-			fmt.println(ddl)
+			fmt.eprintfln("  ✗ %s.%s (alter failed, see error above)", table, col.name)
 		}
 	}
+	return added
+}
+
+// existing_columns reads the live column names of a table from the catalog.
+existing_columns :: proc(conn: ^Pg_Conn, table: string) -> map[string]bool {
+	out := make(map[string]bool, context.temp_allocator)
+	rows, ok := pg_query(
+		conn,
+		"SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1;",
+		[]any{table},
+	)
+	if !ok {
+		return out
+	}
+	for row in rows.rows {
+		if len(row) > 0 {
+			out[row[0]] = true
+		}
+	}
+	return out
+}
+
+// ensure_migration_log creates the table that records applied migration steps —
+// the audit/version trail asked for alongside column diffing.
+ensure_migration_log :: proc(conn: ^Pg_Conn) {
+	pg_simple(
+		conn,
+		"CREATE TABLE IF NOT EXISTS mimir_migrations (name TEXT PRIMARY KEY, applied_at TIMESTAMP NOT NULL DEFAULT now());",
+	)
+}
+
+// log_migration records one applied step, idempotently.
+log_migration :: proc(conn: ^Pg_Conn, name: string) {
+	pg_query(
+		conn,
+		"INSERT INTO mimir_migrations (name) VALUES ($1) ON CONFLICT (name) DO NOTHING;",
+		[]any{name},
+	)
 }
 
 offer :: proc(w: Well, value: any, allocator := context.temp_allocator) -> Statement {

@@ -12,16 +12,23 @@ package gjallarhorn
 //   - Values cross the wire in text format; parameters are sent as text too,
 //     so nothing is ever interpolated into SQL (the injection checkpoint holds).
 //
-// Auth supported: trust (AuthenticationOk), cleartext, and MD5. SASL/SCRAM is
-// detected and reported but not implemented — use `md5` or `trust` in pg_hba.
+// Auth supported: trust (AuthenticationOk), cleartext, MD5, and SCRAM-SHA-256
+// (RFC 5802/7677) — the default for stock modern Postgres. No pg_hba changes
+// needed to connect to a default-configured server.
 
 import "base:runtime"
 import "core:fmt"
 import "core:net"
+import "core:strconv"
 import "core:strings"
 import "core:sync"
 import "core:time"
+import "core:crypto"
+import "core:crypto/hmac"
+import "core:crypto/pbkdf2"
+import "core:crypto/sha2"
 import "core:crypto/legacy/md5"
+import "core:encoding/base64"
 import "core:encoding/hex"
 
 Pg_Conn :: struct {
@@ -236,9 +243,10 @@ pg_auth :: proc(conn: ^Pg_Conn, cfg: Postgres_Config) -> bool {
 				if !pg_password(conn, hashed) {
 					return false
 				}
-			case 10: // SASL
-				fmt.eprintln("mimir/pg: SASL/SCRAM auth not supported — use md5 or trust in pg_hba.conf")
-				return false
+			case 10: // SASL — the mechanism list follows the code
+				if !pg_scram(conn, cfg, msg.payload[4:]) {
+					return false
+				}
 			case:
 				fmt.eprintfln("mimir/pg: unsupported auth request %d", code)
 				return false
@@ -257,6 +265,143 @@ pg_password :: proc(conn: ^Pg_Conn, password: string) -> bool {
 	payload := make([dynamic]u8, 0, 64, context.temp_allocator)
 	put_str(&payload, password)
 	return pg_send(conn, 'p', payload[:])
+}
+
+// ---------------------------------------------------------------------------
+// SCRAM-SHA-256 (GH-030) — RFC 5802 / RFC 7677, no channel binding.
+// ---------------------------------------------------------------------------
+//
+// Four messages: we send client-first, the server replies server-first (a
+// nonce, salt and iteration count), we send client-final (a proof derived from
+// the salted password), and the server replies server-final (a signature we
+// verify). Postgres frames these as SASLInitialResponse/SASLResponse ('p') and
+// AuthenticationSASLContinue/Final ('R', codes 11/12).
+pg_scram :: proc(conn: ^Pg_Conn, cfg: Postgres_Config, mechanisms: []u8) -> bool {
+	if !scram_offers(mechanisms, "SCRAM-SHA-256") {
+		fmt.eprintln("mimir/pg: server did not offer SCRAM-SHA-256")
+		return false
+	}
+
+	// client-first. gs2 header "n,," = no channel binding; the username is
+	// empty because Postgres uses the startup-message user.
+	nonce_raw: [18]u8
+	crypto.rand_bytes(nonce_raw[:])
+	client_nonce, _ := base64.encode(nonce_raw[:], allocator = context.temp_allocator)
+	client_first_bare := fmt.tprintf("n=,r=%s", client_nonce)
+	client_first := fmt.tprintf("n,,%s", client_first_bare)
+
+	// SASLInitialResponse: mechanism name, then a length-prefixed message.
+	init := make([dynamic]u8, 0, 64, context.temp_allocator)
+	put_str(&init, "SCRAM-SHA-256")
+	put_u32(&init, u32(len(client_first)))
+	append(&init, ..transmute([]u8)client_first)
+	if !pg_send(conn, 'p', init[:]) {
+		return false
+	}
+
+	// server-first (AuthenticationSASLContinue, code 11).
+	cont, ok := pg_read_msg(conn, context.temp_allocator)
+	if !ok || cont.type != 'R' || be_u32(cont.payload[0:4]) != 11 {
+		fmt.eprintln("mimir/pg: expected SASLContinue")
+		return false
+	}
+	server_first := string(cont.payload[4:])
+	server_nonce, salt_b64, iter_s, parsed := scram_server_first(server_first)
+	if !parsed || !strings.has_prefix(server_nonce, client_nonce) {
+		fmt.eprintln("mimir/pg: malformed server-first or nonce mismatch")
+		return false
+	}
+	salt, _ := base64.decode(salt_b64, allocator = context.temp_allocator)
+	iterations, _ := strconv.parse_int(iter_s)
+
+	// SaltedPassword = PBKDF2-HMAC-SHA256(password, salt, i)
+	salted: [32]u8
+	pbkdf2.derive(.SHA256, transmute([]u8)cfg.password, salt, u32(iterations), salted[:])
+
+	// ClientKey / StoredKey, and the AuthMessage all three signatures share.
+	client_key: [32]u8
+	hmac.sum(.SHA256, client_key[:], transmute([]u8)string("Client Key"), salted[:])
+	stored_key: [32]u8
+	sha256(client_key[:], stored_key[:])
+
+	client_final_bare := fmt.tprintf("c=biws,r=%s", server_nonce) // biws = base64("n,,")
+	auth_message := fmt.tprintf("%s,%s,%s", client_first_bare, server_first, client_final_bare)
+
+	// ClientProof = ClientKey XOR HMAC(StoredKey, AuthMessage)
+	client_sig: [32]u8
+	hmac.sum(.SHA256, client_sig[:], transmute([]u8)auth_message, stored_key[:])
+	proof: [32]u8
+	for i in 0 ..< 32 {
+		proof[i] = client_key[i] ~ client_sig[i]
+	}
+	proof_b64, _ := base64.encode(proof[:], allocator = context.temp_allocator)
+
+	client_final := fmt.tprintf("%s,p=%s", client_final_bare, proof_b64)
+	if !pg_send(conn, 'p', transmute([]u8)client_final) {
+		return false
+	}
+
+	// server-final (AuthenticationSASLFinal, code 12): verify ServerSignature.
+	fin, fok := pg_read_msg(conn, context.temp_allocator)
+	if !fok || fin.type != 'R' || be_u32(fin.payload[0:4]) != 12 {
+		fmt.eprintln("mimir/pg: expected SASLFinal (bad password?)")
+		return false
+	}
+	server_final := string(fin.payload[4:])
+	if !strings.has_prefix(server_final, "v=") {
+		fmt.eprintln("mimir/pg: malformed server-final")
+		return false
+	}
+
+	server_key: [32]u8
+	hmac.sum(.SHA256, server_key[:], transmute([]u8)string("Server Key"), salted[:])
+	expected: [32]u8
+	hmac.sum(.SHA256, expected[:], transmute([]u8)auth_message, server_key[:])
+	expected_b64, _ := base64.encode(expected[:], allocator = context.temp_allocator)
+	if server_final[2:] != expected_b64 {
+		fmt.eprintln("mimir/pg: SCRAM server signature verification failed")
+		return false
+	}
+	return true
+}
+
+// scram_offers reports whether a SASL mechanism list (null-terminated strings,
+// terminated by an empty string) includes the named mechanism.
+scram_offers :: proc(list: []u8, want: string) -> bool {
+	r := Reader{buf = list}
+	for r.off < len(list) {
+		mech := r_cstr(&r)
+		if mech == "" {
+			break
+		}
+		if mech == want {
+			return true
+		}
+	}
+	return false
+}
+
+// scram_server_first pulls r=, s=, i= out of the server-first message.
+scram_server_first :: proc(s: string) -> (nonce, salt, iter: string, ok: bool) {
+	for tok in strings.split(s, ",", context.temp_allocator) {
+		if len(tok) < 2 {
+			continue
+		}
+		switch tok[:2] {
+		case "r=": nonce = tok[2:]
+		case "s=": salt = tok[2:]
+		case "i=": iter = tok[2:]
+		}
+	}
+	ok = nonce != "" && salt != "" && iter != ""
+	return
+}
+
+sha256 :: proc(data, dst: []u8) {
+	ctx: sha2.Context_256
+	sha2.init_256(&ctx)
+	sha2.update(&ctx, data)
+	sha2.final(&ctx, dst)
 }
 
 pg_simple :: proc(conn: ^Pg_Conn, sql: string) -> bool {

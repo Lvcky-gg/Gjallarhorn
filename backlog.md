@@ -171,6 +171,7 @@ to a realistic database without downgrading `pg_hba` to trust/md5.
 - SCRAM-SHA-256 client flow implemented (client-first, server-first, client-final, server-final verification) using `core:crypto`.
 - Connects against a default-configured Postgres 16 with no `pg_hba` changes.
 - docker-compose comment about trust-auth workaround updated/removed.
+**DONE**
 
 ### GH-031 · TLS for the Postgres connection · **P1** · L
 **Component:** `postgres.odin` (`pg_open` / startup)

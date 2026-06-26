@@ -39,6 +39,7 @@ larger than 8KB, or any request split across TCP segments, are truncated.
 - `MAX_REQUEST` is replaced with a configurable max body size that returns `413` when exceeded.
 - The raw body is exposed as `b.body: []u8` / `b.body_text: string`.
 - Test: a >8KB POST body round-trips intact.
+**DONE**
 
 ### GH-003 · Body decoders: JSON + urlencoded form · **P0** · M
 **Component:** new `body.odin`, `bifrost.odin`
@@ -50,6 +51,7 @@ URL (`POST /sample/:name`) purely to work around this.
 - `form(b) -> map[string]string` parses `application/x-www-form-urlencoded`.
 - Sample `create_handler`/`update_handler` are rewritten to take the name from the body, not the path.
 - Tests for both decoders, including malformed input → `400`.
+**DONE**
 
 ### GH-004 · Parse and expose query-string params · **P1** · S
 **Component:** `server.odin`, `bifrost.odin`

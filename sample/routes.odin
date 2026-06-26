@@ -12,9 +12,10 @@ register :: proc(app: ^gh.App) {
 	gh.get(app, "/sample/schema", schema_handler)
 	gh.get(app, "/sample/:id", get_handler)
 
-	// CRUD against Postgres via Mimir. Data rides in the path (no body parser
-	// yet). Method is matched before path, so these never clash with the GETs.
-	gh.post(app, "/sample/:name", create_handler)      // create
-	gh.put(app, "/sample/:id/:name", update_handler)   // update name by id
+	// CRUD against Postgres via Mimir. Create/update take their payload from a
+	// JSON body; only the id rides in the path. Method is matched before path,
+	// so these never clash with the GETs.
+	gh.post(app, "/sample", create_handler)            // create from JSON body
+	gh.put(app, "/sample/:id", update_handler)         // update name by id, body
 	gh.delete(app, "/sample/:id", delete_handler)      // delete by id
 }

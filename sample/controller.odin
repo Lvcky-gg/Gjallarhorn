@@ -13,17 +13,20 @@ get_handler :: proc(b: ^gh.Bifrost) {
 	gh.json(b, 200, Sample{id = id, name = "thing"})
 }
 
-// POST /sample/:name — create a row. Mímir's `offer` builds the INSERT; we run
-// it with `query` (not `exec`) so Postgres's RETURNING id comes back. The name
-// rides in the path because the server has no request-body parser yet.
+// POST /sample — create a row from a JSON body, e.g. {"name":"thing"}. Mímir's
+// `offer` builds the INSERT; we run it with `query` (not `exec`) so Postgres's
+// RETURNING id comes back.
 create_handler :: proc(b: ^gh.Bifrost) {
-	name, ok := gh.param(b, "name")
-	if !ok {
+	payload: Sample
+	if !gh.bind_json(b, &payload) {
+		return // bind_json already wrote the 400
+	}
+	if payload.name == "" {
 		gh.text(b, 400, "name required")
 		return
 	}
 	w := gh.well(b)
-	rows, qok := gh.query(w, gh.offer(w, Sample{name = name}))
+	rows, qok := gh.query(w, gh.offer(w, Sample{name = payload.name}))
 	if !qok {
 		gh.text(b, 503, "database unavailable")
 		return
@@ -32,18 +35,23 @@ create_handler :: proc(b: ^gh.Bifrost) {
 	if len(rows.rows) > 0 {
 		id, _ = strconv.parse_int(rows.rows[0][0]) // the RETURNING id
 	}
-	gh.json(b, 201, Sample{id = id, name = name})
+	gh.json(b, 201, Sample{id = id, name = payload.name})
 }
 
-// PUT /sample/:id/:name — replace a row's name by id, via Mímir's `amend`
-// (UPDATE ... WHERE id = $n). Reports the command tag, e.g. "UPDATE 1".
+// PUT /sample/:id — replace a row's name by id. The id rides in the path; the
+// new name comes from a JSON body, e.g. {"name":"renamed"}. Uses Mímir's `amend`
+// (UPDATE ... WHERE id = $n) and reports the command tag, e.g. "UPDATE 1".
 update_handler :: proc(b: ^gh.Bifrost) {
 	id, ok := gh.param_int(b, "id")
 	if !ok {
 		gh.text(b, 400, "id must be an integer")
 		return
 	}
-	name, _ := gh.param(b, "name")
+	payload: Sample
+	if !gh.bind_json(b, &payload) {
+		return
+	}
+	name := payload.name
 	w := gh.well(b)
 	rows, qok := gh.query(w, gh.amend(w, Sample{id = id, name = name}))
 	if !qok {

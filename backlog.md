@@ -132,6 +132,7 @@ type whose `%v` form Postgres won't accept.
 **Component:** new `mimir.odin` procs over `postgres.odin`
 **Problem:** No transaction support; multi-statement writes can't be atomic.
 **Done when:** `tx(w, proc)` helper or explicit `begin`/`commit`/`forget`-style verbs; rollback on error; test that a failed second statement rolls back the first.
+**DONE**
 
 ### GH-023 · Schema migration beyond CREATE TABLE IF NOT EXISTS · **P1** · L
 **Component:** `mimir.odin` (`migrate`, `carve`)

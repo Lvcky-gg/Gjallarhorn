@@ -470,6 +470,55 @@ parse_pg_bool :: proc(s: string) -> bool {
 	return false
 }
 
+// ---------------------------------------------------------------------------
+// Transactions (GH-022) — atomic multi-statement writes over a single Well.
+// BEGIN/COMMIT/ROLLBACK ride the simple-query path; the work in between uses
+// the usual offer/amend/forget/query verbs against the same connection.
+// ---------------------------------------------------------------------------
+
+// Tx_Body is the work run inside a transaction. Return true to commit; return
+// false (or let any statement fail) to roll the whole thing back.
+Tx_Body :: proc(w: Well) -> bool
+
+// tx wraps body in BEGIN/COMMIT, rolling back if body reports failure. It
+// returns true only when the work committed cleanly.
+//
+//	ok := tx(w, proc(w: Well) -> bool {
+//	    _, a := query(w, offer(w, Sample{name = "a"}))
+//	    _, b := query(w, offer(w, Sample{name = "b"}))
+//	    return a && b // either insert failing rolls back both
+//	})
+tx :: proc(w: Well, body: Tx_Body) -> bool {
+	if !begin(w) {
+		return false
+	}
+	if body(w) {
+		return commit(w)
+	}
+	rollback(w)
+	return false
+}
+
+// Explicit verbs, for when the transaction spans code tx's single-proc shape
+// can't capture. Pair every begin with a commit or rollback.
+begin :: proc(w: Well) -> bool {
+	return tx_stmt(w, "BEGIN")
+}
+commit :: proc(w: Well) -> bool {
+	return tx_stmt(w, "COMMIT")
+}
+rollback :: proc(w: Well) -> bool {
+	return tx_stmt(w, "ROLLBACK")
+}
+
+@(private)
+tx_stmt :: proc(w: Well, sql: string) -> bool {
+	if w.app == nil || !w.app.pg.open {
+		return false
+	}
+	return pg_simple(&w.app.pg, sql)
+}
+
 placeholder :: proc(d: DB_Type, n: int) -> string {
 	if d == .Postgres {
 		return fmt.tprintf("$%d", n)

@@ -1,5 +1,6 @@
 package sample
 
+import "core:fmt"
 import "core:strconv"
 import gh "../gjallarhorn"
 
@@ -46,7 +47,13 @@ create_handler :: proc(b: ^gh.Bifrost) {
 	w := gh.well(b)
 	rows, qok := gh.query(w, gh.offer(w, Sample{name = payload.name}))
 	if !qok {
-		gh.text(b, 503, "database unavailable")
+		// Distinguish a server-side error (with a SQLSTATE) from the DB being
+		// unreachable, so the client learns *why* it failed.
+		if gh.failed(rows) {
+			gh.text(b, 400, fmt.tprintf("database error %s: %s", rows.err.code, rows.err.message))
+		} else {
+			gh.text(b, 503, "database unavailable")
+		}
 		return
 	}
 	id := 0

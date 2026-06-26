@@ -53,7 +53,21 @@ Pg_Pool :: struct {
 Pg_Rows :: struct {
 	columns: []string,
 	rows:    [][]string,
-	tag:     string, // command tag, e.g. "INSERT 0 1"
+	tag:     string,   // command tag, e.g. "INSERT 0 1"
+	err:     Pg_Error, // set (err.code != "") when the query failed; see GH-032
+}
+
+// Pg_Error is a Postgres ErrorResponse, surfaced so handlers can see why a
+// query failed rather than only a bool. `code` is the SQLSTATE (e.g. "23505").
+Pg_Error :: struct {
+	severity: string,
+	message:  string,
+	code:     string,
+}
+
+// failed reports whether rows carries a server error (vs. an empty/clean read).
+failed :: proc(rows: Pg_Rows) -> bool {
+	return rows.err.code != ""
 }
 
 connect :: proc(app: ^App) -> bool {
@@ -252,7 +266,7 @@ pg_auth :: proc(conn: ^Pg_Conn, cfg: Postgres_Config) -> bool {
 				return false
 			}
 		case 'E': // ErrorResponse
-			fmt.eprintfln("mimir/pg: %s", pg_error_text(msg.payload))
+			fmt.eprintfln("mimir/pg: %s", pg_error_text(parse_pg_error(msg.payload)))
 			return false
 		case 'Z': // ReadyForQuery
 			return true
@@ -419,7 +433,7 @@ pg_simple :: proc(conn: ^Pg_Conn, sql: string) -> bool {
 		}
 		switch msg.type {
 		case 'E':
-			fmt.eprintfln("mimir/pg: %s", pg_error_text(msg.payload))
+			fmt.eprintfln("mimir/pg: %s", pg_error_text(parse_pg_error(msg.payload)))
 			had_error = true
 		case 'Z': // ReadyForQuery terminates the exchange
 			return !had_error
@@ -496,8 +510,9 @@ pg_query :: proc(conn: ^Pg_Conn, sql: string, args: []any, allocator := context.
 			append(&rows, parse_data_row(msg.payload, allocator))
 		case 'C': // CommandComplete — payload is the command tag (cstring)
 			out.tag = strings.clone(cstring_of(msg.payload), allocator)
-		case 'E': // ErrorResponse
-			fmt.eprintfln("mimir/pg: %s", pg_error_text(msg.payload))
+		case 'E': // ErrorResponse — keep it structured for the caller
+			out.err = parse_pg_error(msg.payload, allocator)
+			fmt.eprintfln("mimir/pg: %s", pg_error_text(out.err))
 			had_error = true
 		case 'Z': // ReadyForQuery
 			out.rows = rows[:]
@@ -634,10 +649,13 @@ pg_read_full :: proc(conn: ^Pg_Conn, dst: []u8) -> bool {
 	return true
 }
 
-// pg_error_text flattens an ErrorResponse into "SEVERITY: message (CODE)".
-pg_error_text :: proc(payload: []u8) -> string {
+// parse_pg_error reads an ErrorResponse payload into a Pg_Error. Fields are
+// `[field-byte][cstring]` pairs terminated by a zero byte; we keep severity (S),
+// message (M) and the SQLSTATE code (C). Strings are cloned so the error
+// outlives the (often temporary) payload buffer.
+parse_pg_error :: proc(payload: []u8, allocator := context.temp_allocator) -> Pg_Error {
 	r := Reader{buf = payload}
-	severity, message, code := "", "", ""
+	e: Pg_Error
 	for r.off < len(payload) {
 		field := payload[r.off]
 		r.off += 1
@@ -646,12 +664,17 @@ pg_error_text :: proc(payload: []u8) -> string {
 		}
 		value := r_cstr(&r)
 		switch field {
-		case 'S': severity = value
-		case 'M': message = value
-		case 'C': code = value
+		case 'S': e.severity = strings.clone(value, allocator)
+		case 'M': e.message = strings.clone(value, allocator)
+		case 'C': e.code = strings.clone(value, allocator)
 		}
 	}
-	return fmt.tprintf("%s: %s (%s)", severity, message, code)
+	return e
+}
+
+// pg_error_text flattens a Pg_Error into "SEVERITY: message (CODE)" for logs.
+pg_error_text :: proc(e: Pg_Error) -> string {
+	return fmt.tprintf("%s: %s (%s)", e.severity, e.message, e.code)
 }
 
 put_u32 :: proc(b: ^[dynamic]u8, v: u32) {

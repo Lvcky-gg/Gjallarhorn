@@ -179,12 +179,14 @@ to a realistic database without downgrading `pg_hba` to trust/md5.
 the wire in the open. Managed Postgres typically requires TLS.
 **Depends on:** a TLS story for `core:net` (may need `core:crypto/tls` or an external approach — spike first).
 **Done when:** `sslmode`-style option; SSLRequest handshake before startup; verified connection to a TLS-required server.
+**Spike (2026-06-26):** BLOCKED — Odin ships no TLS in `core` or `vendor` (`core:net` has none; `core/mem/tlsf` is unrelated). Meeting "Done when" requires an external TLS dependency: foreign bindings to system libssl/libcrypto wrapping the socket after the SSLRequest `'S'` reply. Deferred pending a decision to take on that C dependency. The SSLRequest negotiation itself (send probe, read `'S'`/`'N'`) is implementable without TLS and is the natural first slice when revived.
 
-### GH-032 · Driver error surfacing to handlers · **P2** · S
+### GH-032 · Driver error surfacing to handlers · **P2** · S · **DONE**
 **Component:** `postgres.odin`, `mimir.odin`
 **Problem:** Errors are `eprintfln`'d and flattened to a bool; handlers can't see
 *why* a query failed (only `503 database unavailable`).
 **Done when:** errors return a structured `Pg_Error{severity, message, code}` that handlers can inspect; the SQLSTATE code is preserved.
+**DONE**
 
 ---
 

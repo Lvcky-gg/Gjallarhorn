@@ -13,9 +13,9 @@ import "core:time"
 
 run :: proc(app: ^App) {
 
-	if app.postgres.dbname != "" && !app.pg.open {
+	if app.postgres.dbname != "" && !app.pool.open {
 		if connect(app) {
-			fmt.printfln("mimir: connected to postgres %s/%s", app.postgres.host, app.postgres.dbname)
+			fmt.printfln("mimir: connected to postgres %s/%s (pool of %d)", app.postgres.host, app.postgres.dbname, app.pool_size)
 		} else {
 			fmt.eprintln("mimir: postgres unavailable — migrations will print only")
 		}

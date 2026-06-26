@@ -150,6 +150,7 @@ to a model does nothing to an existing table — no ALTER, no diffing, no versio
 single-threaded server, but incompatible with GH-010.
 **Depends on:** GH-010.
 **Done when:** a small fixed-size pool with checkout/return; safe under concurrent handlers; configurable size.
+**DONE**
 
 ### GH-025 · Relationships / foreign keys · **P2** · L
 **Component:** `mimir.odin`

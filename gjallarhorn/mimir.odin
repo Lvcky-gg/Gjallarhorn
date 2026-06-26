@@ -32,6 +32,7 @@ import "core:reflect"
 Well :: struct {
 	dialect: DB_Type,
 	app:     ^App,
+	conn:    ^Pg_Conn, // pinned connection for a transaction; nil => pool per call
 }
 
 well :: proc{well_from_app, well_from_bifrost}
@@ -195,27 +196,35 @@ migrate :: proc(app: ^App) {
 
 	// Offline (no connection): just print the CREATE DDL as before — there's no
 	// live schema to diff against.
-	if !app.pg.open {
+	if !app.pool.open {
 		for m in app.models {
 			fmt.println(carve(w, m))
 		}
 		return
 	}
 
-	ensure_migration_log(&app.pg)
+	// Migration runs once at startup; pin a single pooled connection for it.
+	conn, ok := pool_acquire(&app.pool)
+	if !ok {
+		fmt.eprintln("mimir: could not acquire a connection for migration")
+		return
+	}
+	defer pool_release(&app.pool, conn)
+
+	ensure_migration_log(conn)
 
 	for m in app.models {
 		table := table_name(m)
 
 		// 1. CREATE TABLE IF NOT EXISTS — makes a brand-new table whole.
-		if !pg_simple(&app.pg, carve(w, m)) {
+		if !pg_simple(conn, carve(w, m)) {
 			fmt.eprintfln("  ✗ %s (create failed, see error above)", table)
 			continue
 		}
 
 		// 2. Diff the model against the live columns and ALTER in the missing
 		//    ones, so adding a field to an existing model takes effect.
-		added := add_missing_columns(app, w, m, table)
+		added := add_missing_columns(conn, w, m, table)
 		fmt.printfln("  ✓ %s (+%d column(s))", table, added)
 	}
 }
@@ -225,8 +234,8 @@ migrate :: proc(app: ^App) {
 // New columns are nullable — backfilling a NOT NULL on a populated table needs
 // a default, which is out of scope here. Auto/serial columns are skipped: they
 // belong to CREATE TABLE, not a later ALTER. Returns the number added.
-add_missing_columns :: proc(app: ^App, w: Well, T: typeid, table: string) -> int {
-	existing := existing_columns(&app.pg, table)
+add_missing_columns :: proc(conn: ^Pg_Conn, w: Well, T: typeid, table: string) -> int {
+	existing := existing_columns(conn, table)
 	added := 0
 	for col in columns_of(T) {
 		if col.auto || col.name in existing {
@@ -236,8 +245,8 @@ add_missing_columns :: proc(app: ^App, w: Well, T: typeid, table: string) -> int
 			"ALTER TABLE %s ADD COLUMN %s %s;",
 			table, col.name, sql_type(w.dialect, col.type_id),
 		)
-		if pg_simple(&app.pg, alter) {
-			log_migration(&app.pg, fmt.tprintf("add_column:%s.%s", table, col.name))
+		if pg_simple(conn, alter) {
+			log_migration(conn, fmt.tprintf("add_column:%s.%s", table, col.name))
 			added += 1
 		} else {
 			fmt.eprintfln("  ✗ %s.%s (alter failed, see error above)", table, col.name)
@@ -557,8 +566,10 @@ parse_pg_bool :: proc(s: string) -> bool {
 // false (or let any statement fail) to roll the whole thing back.
 Tx_Body :: proc(w: Well) -> bool
 
-// tx wraps body in BEGIN/COMMIT, rolling back if body reports failure. It
-// returns true only when the work committed cleanly.
+// tx checks out one connection from the pool, wraps body in BEGIN/COMMIT, and
+// rolls back if body reports failure. The Well handed to body is pinned to that
+// connection, so every statement inside runs on the one transaction. Returns
+// true only when the work committed cleanly.
 //
 //	ok := tx(w, proc(w: Well) -> bool {
 //	    _, a := query(w, offer(w, Sample{name = "a"}))
@@ -566,18 +577,53 @@ Tx_Body :: proc(w: Well) -> bool
 //	    return a && b // either insert failing rolls back both
 //	})
 tx :: proc(w: Well, body: Tx_Body) -> bool {
-	if !begin(w) {
+	if w.app == nil || !w.app.pool.open {
 		return false
 	}
-	if body(w) {
-		return commit(w)
+	conn, ok := pool_acquire(&w.app.pool)
+	if !ok {
+		return false
 	}
-	rollback(w)
+	defer pool_release(&w.app.pool, conn)
+
+	tw := w
+	tw.conn = conn // pin the body's statements to this connection
+
+	if !pg_simple(conn, "BEGIN") {
+		return false
+	}
+	if body(tw) {
+		return pg_simple(conn, "COMMIT")
+	}
+	pg_simple(conn, "ROLLBACK")
 	return false
 }
 
-// Explicit verbs, for when the transaction spans code tx's single-proc shape
-// can't capture. Pair every begin with a commit or rollback.
+// pin checks out a dedicated connection so a transaction can span multiple
+// calls the single-proc `tx` shape can't hold. Pair with unpin; use the
+// returned (pinned) Well for begin/commit/rollback and the queries between.
+pin :: proc(w: Well) -> (Well, bool) {
+	if w.app == nil || !w.app.pool.open {
+		return w, false
+	}
+	conn, ok := pool_acquire(&w.app.pool)
+	if !ok {
+		return w, false
+	}
+	pinned := w
+	pinned.conn = conn
+	return pinned, true
+}
+
+// unpin returns a pinned Well's connection to the pool.
+unpin :: proc(w: Well) {
+	if w.app != nil && w.conn != nil {
+		pool_release(&w.app.pool, w.conn)
+	}
+}
+
+// Explicit transaction verbs. They require a pinned Well (from pin or tx); on an
+// unpinned Well there is no stable connection to run them against.
 begin :: proc(w: Well) -> bool {
 	return tx_stmt(w, "BEGIN")
 }
@@ -590,10 +636,10 @@ rollback :: proc(w: Well) -> bool {
 
 @(private)
 tx_stmt :: proc(w: Well, sql: string) -> bool {
-	if w.app == nil || !w.app.pg.open {
+	if w.conn == nil {
 		return false
 	}
-	return pg_simple(&w.app.pg, sql)
+	return pg_simple(w.conn, sql)
 }
 
 placeholder :: proc(d: DB_Type, n: int) -> string {

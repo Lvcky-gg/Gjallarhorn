@@ -19,9 +19,6 @@ MigrateModel :: struct {
 
 @(test)
 migrate_adds_missing_columns :: proc(t: ^testing.T) {
-	app := gh.App {
-		db_type = .Postgres,
-	}
 	cfg := gh.Postgres_Config {
 		host     = "127.0.0.1",
 		port     = 5432,
@@ -29,34 +26,41 @@ migrate_adds_missing_columns :: proc(t: ^testing.T) {
 		password = "secret",
 		dbname   = "gjallarhorn",
 	}
-	if !gh.pg_open(&app.pg, cfg) {
+
+	app := gh.new(gh.Config{db_type = .Postgres, postgres = cfg, pool_size = 1})
+	if !gh.connect(&app) {
 		fmt.eprintln("migrate_test: postgres unavailable; skipping migration test")
 		return
 	}
-	defer net.close(app.pg.sock)
+	defer gh.disconnect(&app)
 
 	gh.remember(&app, MigrateModel)
 	defer delete(app.models)
 
+	// A standalone connection for setup and column inspection.
+	probe: gh.Pg_Conn
+	gh.pg_open(&probe, cfg)
+	defer net.close(probe.sock)
+
 	// Stand in for an older schema: the table exists with only `id`, missing
 	// the `title` and `score` fields the model has since grown.
-	gh.pg_query(&app.pg, "DROP TABLE IF EXISTS migratemodels;", nil)
-	gh.pg_query(&app.pg, "CREATE TABLE migratemodels (id BIGINT);", nil)
+	gh.pg_query(&probe, "DROP TABLE IF EXISTS migratemodels;", nil)
+	gh.pg_query(&probe, "CREATE TABLE migratemodels (id BIGINT);", nil)
 
-	before := gh.existing_columns(&app.pg, "migratemodels")
+	before := gh.existing_columns(&probe, "migratemodels")
 	testing.expect(t, !("title" in before), "precondition: title not yet present")
 	testing.expect(t, !("score" in before), "precondition: score not yet present")
 
 	gh.migrate(&app)
 
-	after := gh.existing_columns(&app.pg, "migratemodels")
+	after := gh.existing_columns(&probe, "migratemodels")
 	testing.expect(t, "id" in after, "id stays")
 	testing.expect(t, "title" in after, "title added by migrate")
 	testing.expect(t, "score" in after, "score added by migrate")
 
 	// The additions are recorded in the migration log.
 	logged, _ := gh.pg_query(
-		&app.pg,
+		&probe,
 		"SELECT name FROM mimir_migrations WHERE name LIKE 'add_column:migratemodels.%';",
 		nil,
 	)
@@ -64,8 +68,8 @@ migrate_adds_missing_columns :: proc(t: ^testing.T) {
 
 	// Idempotent: a second migrate adds nothing more.
 	gh.migrate(&app)
-	again := gh.existing_columns(&app.pg, "migratemodels")
+	again := gh.existing_columns(&probe, "migratemodels")
 	testing.expect_value(t, len(again), len(after))
 
-	gh.pg_query(&app.pg, "DROP TABLE IF EXISTS migratemodels;", nil)
+	gh.pg_query(&probe, "DROP TABLE IF EXISTS migratemodels;", nil)
 }

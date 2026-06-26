@@ -33,22 +33,26 @@ Postgres_Config :: struct {
 
 // DEFAULT_MAX_BODY caps request bodies when Config.max_body is left zero.
 DEFAULT_MAX_BODY :: 1 << 20 // 1 MiB
+// DEFAULT_POOL_SIZE is the connection-pool size when Config.pool_size is zero.
+DEFAULT_POOL_SIZE :: 4
 
 Config :: struct {
-	host:     string, // bind address, e.g. "0.0.0.0"; empty -> loopback
-	port:     int,
-	db_type:  DB_Type,
-	postgres: Postgres_Config,
-	max_body: int, // largest request body accepted; 0 -> DEFAULT_MAX_BODY
+	host:      string, // bind address, e.g. "0.0.0.0"; empty -> loopback
+	port:      int,
+	db_type:   DB_Type,
+	postgres:  Postgres_Config,
+	max_body:  int, // largest request body accepted; 0 -> DEFAULT_MAX_BODY
+	pool_size: int, // DB connections to pool; 0 -> DEFAULT_POOL_SIZE
 }
 
 App :: struct {
 	host:       string,      // bind address; empty -> loopback (see server.odin)
 	port:       int,
 	max_body:   int,         // largest request body accepted, in bytes
+	pool_size:  int,         // DB connection-pool size; see postgres.odin
 	db_type:    DB_Type,     // dialect Mimir speaks; see mimir.odin
 	postgres:   Postgres_Config,
-	pg:         Pg_Conn,     // live connection; pg.open is false until connect()
+	pool:       Pg_Pool,     // DB connections; pool.open is false until connect()
 	models:     [dynamic]typeid, // shapes Mimir remembers + migrates at startup
 	routes:     [dynamic]Route,
 	middleware: [dynamic]Middleware,
@@ -61,11 +65,16 @@ new :: proc(cfg: Config) -> App {
 	if max_body <= 0 {
 		max_body = DEFAULT_MAX_BODY
 	}
+	pool_size := cfg.pool_size
+	if pool_size <= 0 {
+		pool_size = DEFAULT_POOL_SIZE
+	}
 	return App {
-		host     = cfg.host,
-		port     = cfg.port,
-		max_body = max_body,
-		db_type  = cfg.db_type,
-		postgres = cfg.postgres,
+		host      = cfg.host,
+		port      = cfg.port,
+		max_body  = max_body,
+		pool_size = pool_size,
+		db_type   = cfg.db_type,
+		postgres  = cfg.postgres,
 	}
 }

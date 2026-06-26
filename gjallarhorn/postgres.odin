@@ -19,6 +19,7 @@ import "base:runtime"
 import "core:fmt"
 import "core:net"
 import "core:strings"
+import "core:sync"
 import "core:time"
 import "core:crypto/legacy/md5"
 import "core:encoding/hex"
@@ -26,6 +27,20 @@ import "core:encoding/hex"
 Pg_Conn :: struct {
 	sock: net.TCP_Socket,
 	open: bool,
+	idx:  int, // slot within its Pg_Pool (0 when standalone)
+}
+
+// Pg_Pool is a small fixed-size set of connections with checkout/return,
+// guarded so concurrent handlers (GH-010) never share a connection. A
+// semaphore counts free connections; a worker that finds none blocks until one
+// is returned. The mutex protects the free-list.
+Pg_Pool :: struct {
+	conns:     []Pg_Conn,
+	available: [dynamic]int, // indices of free connections
+	mutex:     sync.Mutex,
+	sem:       sync.Sema,
+	size:      int,
+	open:      bool,
 }
 
 Pg_Rows :: struct {
@@ -35,29 +50,119 @@ Pg_Rows :: struct {
 }
 
 connect :: proc(app: ^App) -> bool {
-	return pg_open(&app.pg, app.postgres)
+	return pool_open(&app.pool, app.postgres, app.pool_size)
 }
 
 disconnect :: proc(app: ^App) {
-	if app.pg.open {
-		net.close(app.pg.sock)
-		app.pg.open = false
-	}
+	pool_close(&app.pool)
 }
 
 exec :: proc(w: Well, stmt: Statement) -> bool {
-	if w.app == nil || !w.app.pg.open {
+	conn, release, ok := well_conn(w)
+	if !ok {
 		return false
 	}
-	_, ok := pg_query(&w.app.pg, stmt.sql, stmt.args[:], context.temp_allocator)
-	return ok
+	_, qok := pg_query(conn, stmt.sql, stmt.args[:], context.temp_allocator)
+	if release {
+		pool_release(&w.app.pool, conn)
+	}
+	return qok
 }
 
 query_well :: proc(w: Well, stmt: Statement, allocator := context.temp_allocator) -> (Pg_Rows, bool) {
-	if w.app == nil || !w.app.pg.open {
+	conn, release, ok := well_conn(w)
+	if !ok {
 		return {}, false
 	}
-	return pg_query(&w.app.pg, stmt.sql, stmt.args[:], allocator)
+	out, qok := pg_query(conn, stmt.sql, stmt.args[:], allocator)
+	if release {
+		pool_release(&w.app.pool, conn)
+	}
+	return out, qok
+}
+
+// well_conn yields the connection a Well should use. A transaction pins one
+// (w.conn set) and must not be released per statement; otherwise we check one
+// out of the pool and tell the caller to return it (release=true).
+well_conn :: proc(w: Well) -> (conn: ^Pg_Conn, release: bool, ok: bool) {
+	if w.app == nil || !w.app.pool.open {
+		return nil, false, false
+	}
+	if w.conn != nil {
+		return w.conn, false, true
+	}
+	c, acquired := pool_acquire(&w.app.pool)
+	if !acquired {
+		return nil, false, false
+	}
+	return c, true, true
+}
+
+// ---------------------------------------------------------------------------
+// Connection pool (GH-024)
+// ---------------------------------------------------------------------------
+
+// pool_open dials `size` connections up front (min 1). If any fails, it closes
+// the ones already opened and reports failure — an all-or-nothing pool.
+pool_open :: proc(pool: ^Pg_Pool, cfg: Postgres_Config, size: int) -> bool {
+	n := size
+	if n <= 0 {
+		n = 1
+	}
+	pool.conns = make([]Pg_Conn, n)
+	pool.available = make([dynamic]int, 0, n)
+	for i in 0 ..< n {
+		if !pg_open(&pool.conns[i], cfg) {
+			for j in 0 ..< i {
+				net.close(pool.conns[j].sock)
+			}
+			delete_slice(pool.conns)
+			delete_dynamic_array(pool.available)
+			pool^ = {}
+			return false
+		}
+		pool.conns[i].idx = i
+		append(&pool.available, i)
+	}
+	pool.size = n
+	sync.sema_post(&pool.sem, n)
+	pool.open = true
+	return true
+}
+
+pool_close :: proc(pool: ^Pg_Pool) {
+	if !pool.open {
+		return
+	}
+	for i in 0 ..< len(pool.conns) {
+		if pool.conns[i].open {
+			net.close(pool.conns[i].sock)
+			pool.conns[i].open = false
+		}
+	}
+	delete_slice(pool.conns)
+	delete_dynamic_array(pool.available)
+	pool.open = false
+}
+
+// pool_acquire blocks until a connection is free, then hands it out.
+pool_acquire :: proc(pool: ^Pg_Pool) -> (^Pg_Conn, bool) {
+	if !pool.open {
+		return nil, false
+	}
+	sync.sema_wait(&pool.sem)
+	sync.mutex_lock(&pool.mutex)
+	idx := pop(&pool.available)
+	sync.mutex_unlock(&pool.mutex)
+	return &pool.conns[idx], true
+}
+
+// pool_release returns a connection to the free-list and wakes one waiter.
+pool_release :: proc(pool: ^Pg_Pool, conn: ^Pg_Conn) {
+	sync.mutex_lock(&pool.mutex)
+	append(&pool.available, conn.idx)
+	sync.mutex_unlock(&pool.mutex)
+	sync.sema_post(&pool.sem)
 }
 
 pg_open :: proc(conn: ^Pg_Conn, cfg: Postgres_Config) -> bool {

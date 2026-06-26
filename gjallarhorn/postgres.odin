@@ -19,6 +19,7 @@ import "base:runtime"
 import "core:fmt"
 import "core:net"
 import "core:strings"
+import "core:time"
 import "core:crypto/legacy/md5"
 import "core:encoding/hex"
 
@@ -178,6 +179,24 @@ pg_simple :: proc(conn: ^Pg_Conn, sql: string) -> bool {
 }
 
 pg_query :: proc(conn: ^Pg_Conn, sql: string, args: []any, allocator := context.temp_allocator) -> (out: Pg_Rows, ok: bool) {
+	// Encode every bind arg to Postgres text format up front, before any bytes
+	// hit the wire — so an unsupported type fails loudly here, leaving the
+	// connection clean rather than half-sent and desynced.
+	encoded := make([]string, len(args), context.temp_allocator)
+	is_null := make([]bool, len(args), context.temp_allocator)
+	for a, i in args {
+		if a == nil {
+			is_null[i] = true
+			continue
+		}
+		text, enc_ok := encode_arg(a, context.temp_allocator)
+		if !enc_ok {
+			fmt.eprintfln("mimir/pg: cannot encode bind arg $%d of type %v", i + 1, a.id)
+			return {}, false
+		}
+		encoded[i] = text
+	}
+
 	// Parse (unnamed statement, let the server infer parameter types).
 	parse := make([dynamic]u8, 0, len(sql) + 16, context.temp_allocator)
 	put_str(&parse, "")
@@ -191,12 +210,12 @@ pg_query :: proc(conn: ^Pg_Conn, sql: string, args: []any, allocator := context.
 	put_str(&bind, "") // statement
 	put_u16(&bind, 0)  // 0 param format codes => all text
 	put_u16(&bind, u16(len(args)))
-	for a in args {
-		if a == nil {
+	for i in 0 ..< len(args) {
+		if is_null[i] {
 			put_u32(&bind, 0xFFFF_FFFF) // -1 length => NULL
 			continue
 		}
-		s := fmt.tprintf("%v", a)
+		s := encoded[i]
 		put_u32(&bind, u32(len(s)))
 		append(&bind, ..transmute([]u8)s)
 	}
@@ -262,6 +281,58 @@ parse_data_row :: proc(payload: []u8, allocator: runtime.Allocator) -> []string 
 		row[i] = strings.clone(string(r_bytes(&r, int(length))), allocator)
 	}
 	return row
+}
+
+// ---------------------------------------------------------------------------
+// Bind-argument encoding (GH-021)
+// ---------------------------------------------------------------------------
+//
+// Every parameter crosses the wire in text format; the server coerces the text
+// to the target column's type. The supported Odin -> Postgres mapping:
+//
+//   int, i8..i64, uint, u8..u64   decimal literal        int2/int4/int8, numeric
+//   f32, f64                      %v (shortest form)     real/double, numeric
+//   bool                          't' / 'f'              boolean
+//   string, cstring               verbatim               text/varchar/char/...
+//   []u8                          '\xDEADBEEF' hex form  bytea
+//   time.Time                     'YYYY-MM-DD HH:MM:SS'  timestamp / date
+//
+// Any other type returns ok=false: pg_query then refuses the statement rather
+// than shipping a `%v` rendering the server can't parse (the old behaviour).
+encode_arg :: proc(a: any, allocator := context.temp_allocator) -> (text: string, ok: bool) {
+	switch v in a {
+	case int:     return fmt.aprintf("%d", v, allocator = allocator), true
+	case i8:      return fmt.aprintf("%d", v, allocator = allocator), true
+	case i16:     return fmt.aprintf("%d", v, allocator = allocator), true
+	case i32:     return fmt.aprintf("%d", v, allocator = allocator), true
+	case i64:     return fmt.aprintf("%d", v, allocator = allocator), true
+	case uint:    return fmt.aprintf("%d", v, allocator = allocator), true
+	case u8:      return fmt.aprintf("%d", v, allocator = allocator), true
+	case u16:     return fmt.aprintf("%d", v, allocator = allocator), true
+	case u32:     return fmt.aprintf("%d", v, allocator = allocator), true
+	case u64:     return fmt.aprintf("%d", v, allocator = allocator), true
+	case f32:     return fmt.aprintf("%v", v, allocator = allocator), true
+	case f64:     return fmt.aprintf("%v", v, allocator = allocator), true
+	case bool:    return v ? "t" : "f", true
+	case string:  return v, true
+	case cstring: return strings.clone(string(v), allocator), true
+	case []u8:    return bytea_text(v, allocator), true
+	case time.Time:
+		y, mo, d := time.date(v)
+		h, mi, s := time.clock_from_time(v)
+		return fmt.aprintf(
+			"%04d-%02d-%02d %02d:%02d:%02d",
+			y, int(mo), d, h, mi, s,
+			allocator = allocator,
+		), true
+	}
+	return "", false
+}
+
+// bytea_text renders bytes as Postgres's hex bytea input: \x followed by hex.
+bytea_text :: proc(b: []u8, allocator := context.temp_allocator) -> string {
+	encoded, _ := hex.encode(b, allocator)
+	return strings.concatenate({"\\x", string(encoded)}, allocator)
 }
 
 // ---------------------------------------------------------------------------

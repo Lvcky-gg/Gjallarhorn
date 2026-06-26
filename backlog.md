@@ -126,6 +126,7 @@ int/string/bool, but breaks for timestamps, numeric/decimal, bytea, and any
 type whose `%v` form Postgres won't accept.
 **Depends on:** GH-020 (shared type-mapping table).
 **Done when:** a documented arg-encoding table covers the supported Odin types; dates/timestamps handled; an unsupported type fails loudly rather than silently sending garbage.
+**DONE**
 
 ### GH-022 · Transactions (BEGIN/COMMIT/ROLLBACK) · **P1** · M
 **Component:** new `mimir.odin` procs over `postgres.odin`

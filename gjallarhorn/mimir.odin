@@ -26,18 +26,12 @@ import "core:fmt"
 import "core:strings"
 import "core:reflect"
 
-// Well — the handle through which Mímir works: a dialect for building SQL plus
-// the app whose live connection (App.pg) runs it. Building procs (carve, offer,
-// recall…) only need the dialect; exec / query reach through `app`. Draw one
-// with `well`.
+
 Well :: struct {
 	dialect: DB_Type,
-	app:     ^App, // nil when only building SQL; required to exec/query
+	app:     ^App,
 }
 
-// well: draw a Well speaking the dialect chosen in Config. Take it from the app
-// at setup, or from a Bifrost inside a handler — the latter reaches the app
-// through the internal `_app` cursor so handlers never touch it themselves.
 well :: proc{well_from_app, well_from_bifrost}
 
 well_from_app :: proc(app: ^App) -> Well {
@@ -48,30 +42,14 @@ well_from_bifrost :: proc(b: ^Bifrost) -> Well {
 	return Well{dialect = b._app.db_type, app = b._app}
 }
 
-// Statement — generated SQL and the arguments that fill its placeholders, in
-// order. `args` borrow from the value passed to offer/amend/forget; use the
-// Statement before that value goes out of scope.
 Statement :: struct {
 	sql:  string,
 	args: [dynamic]any,
 }
 
-// ---------------------------------------------------------------------------
-// Schema: reading `db:` tags off a struct
-// ---------------------------------------------------------------------------
-//
-// Tag grammar:  `db:"column,flag,flag"`
-//   column   the SQL column name; defaults to the field name if empty
-//   flags    pk       this column is the primary key
-//            auto     the database assigns it (serial / autoincrement) — Mímir
-//                     never writes it on offer
-//            unique   UNIQUE constraint
-//            notnull  NOT NULL constraint
-// A field with `db:"-"` (or no usable name) is skipped entirely.
-
 Column :: struct {
-	field:   string,  // Odin field name, used to read the value via reflection
-	name:    string,  // SQL column name
+	field:   string,
+	name:    string,
 	type_id: typeid,
 	pk:      bool,
 	auto:    bool,
@@ -79,8 +57,6 @@ Column :: struct {
 	notnull: bool,
 }
 
-// columns_of reflects a struct typeid into its mapped columns. Untagged fields
-// fall back to their field name as the column; only `db:"-"` opts out.
 columns_of :: proc(T: typeid, allocator := context.temp_allocator) -> []Column {
 	cols := make([dynamic]Column, allocator)
 	for f in reflect.struct_fields_zipped(T) {
@@ -109,9 +85,6 @@ columns_of :: proc(T: typeid, allocator := context.temp_allocator) -> []Column {
 	return cols[:]
 }
 
-// table_name derives the table from the struct's name: `Sample` -> "samples".
-// Lowercased and naively pluralised — predictable, and good enough until an
-// explicit override is wanted.
 table_name :: proc(T: typeid, allocator := context.temp_allocator) -> string {
 	name := "rows"
 	ti := type_info_of(T)
@@ -125,11 +98,6 @@ table_name :: proc(T: typeid, allocator := context.temp_allocator) -> string {
 	return strings.concatenate({lower, "s"}, allocator)
 }
 
-// ---------------------------------------------------------------------------
-// carve — CREATE TABLE
-// ---------------------------------------------------------------------------
-
-// carve emits the CREATE TABLE DDL for a struct in the Well's dialect.
 carve :: proc(w: Well, T: typeid, allocator := context.temp_allocator) -> string {
 	b := strings.builder_make(allocator)
 	fmt.sbprintf(&b, "CREATE TABLE IF NOT EXISTS %s (\n", table_name(T, allocator))
@@ -146,8 +114,6 @@ carve :: proc(w: Well, T: typeid, allocator := context.temp_allocator) -> string
 	return strings.to_string(b)
 }
 
-// column_ddl renders one column's type and constraints. An `auto` primary key
-// becomes the dialect's autoincrement form and folds PRIMARY KEY into itself.
 column_ddl :: proc(d: DB_Type, col: Column) -> string {
 	if col.pk && col.auto {
 		switch d {
@@ -171,8 +137,6 @@ column_ddl :: proc(d: DB_Type, col: Column) -> string {
 	return strings.to_string(sb)
 }
 
-// sql_type maps an Odin type to a column type per dialect. Unknown types fall
-// back to TEXT — Mímir would rather store something than refuse the shape.
 sql_type :: proc(d: DB_Type, id: typeid) -> string {
 	switch id {
 	case int, i64, i32, i16, i8, u64, u32, u16, u8:
@@ -202,25 +166,12 @@ sql_type :: proc(d: DB_Type, id: typeid) -> string {
 	return "TEXT"
 }
 
-// ---------------------------------------------------------------------------
-// remember / migrate — schema, derived from your models, applied for you
-// ---------------------------------------------------------------------------
-//
-// The "auto-magic": you never write a CREATE TABLE. You hand Mímir your model
-// types once with `remember`, and `migrate` carves every one of them. `run`
-// calls `migrate` at startup, so defining a tagged struct and remembering it is
-// the whole ceremony — the table follows from the shape.
-
-// remember: register one or more model types so Mímir migrates them at startup.
-// Call it from your package's register proc, e.g. remember(app, Sample, User).
 remember :: proc(app: ^App, models: ..typeid) {
 	for m in models {
 		append(&app.models, m)
 	}
 }
 
-// schema_sql concatenates the CREATE TABLE DDL for every remembered model, in
-// registration order. Handy for writing a migration file or inspecting it.
 schema_sql :: proc(app: ^App, allocator := context.temp_allocator) -> string {
 	w := well(app)
 	b := strings.builder_make(allocator)
@@ -233,10 +184,6 @@ schema_sql :: proc(app: ^App, allocator := context.temp_allocator) -> string {
 	return strings.to_string(b)
 }
 
-// migrate derives and applies the schema for every remembered model. Each table
-// is `CREATE TABLE IF NOT EXISTS`, so re-running is safe. Without a live
-// connection (the deferred phase) it emits the DDL it would execute; once Well
-// grows a socket, swap the print for an exec — the call site here doesn't change.
 migrate :: proc(app: ^App) {
 	if len(app.models) == 0 {
 		return
@@ -246,25 +193,17 @@ migrate :: proc(app: ^App) {
 	for m in app.models {
 		ddl := carve(w, m)
 		if app.pg.open {
-			// Live connection: run the DDL. CREATE TABLE IF NOT EXISTS is idempotent.
 			if pg_simple(&app.pg, ddl) {
 				fmt.printfln("  ✓ %s", table_name(m))
 			} else {
 				fmt.eprintfln("  ✗ %s (see error above)", table_name(m))
 			}
 		} else {
-			// Offline: print the DDL Mímir would execute.
 			fmt.println(ddl)
 		}
 	}
 }
 
-// ---------------------------------------------------------------------------
-// offer — INSERT
-// ---------------------------------------------------------------------------
-
-// offer builds an INSERT for a value. `auto` columns are left to the database.
-// Postgres statements carry a RETURNING clause for the primary key.
 offer :: proc(w: Well, value: any, allocator := context.temp_allocator) -> Statement {
 	cols := columns_of(value.id, allocator)
 	stmt := Statement{args = make([dynamic]any, allocator)}
@@ -303,12 +242,6 @@ offer :: proc(w: Well, value: any, allocator := context.temp_allocator) -> State
 	return stmt
 }
 
-// ---------------------------------------------------------------------------
-// amend / forget — UPDATE and DELETE by primary key
-// ---------------------------------------------------------------------------
-
-// amend builds an UPDATE that writes every non-pk, non-auto column of `value`,
-// keyed on its primary key. The pk value is the final bound argument.
 amend :: proc(w: Well, value: any, allocator := context.temp_allocator) -> Statement {
 	cols := columns_of(value.id, allocator)
 	stmt := Statement{args = make([dynamic]any, allocator)}
@@ -364,12 +297,6 @@ forget :: proc(w: Well, value: any, allocator := context.temp_allocator) -> Stat
 	return stmt
 }
 
-// ---------------------------------------------------------------------------
-// recall — SELECT, a small fluent builder
-// ---------------------------------------------------------------------------
-
-// Query accumulates SELECT clauses. Build it with recall, refine with where /
-// order_by / limit, then materialise with `sql`.
 Query :: struct {
 	dialect: DB_Type,
 	table:   string,
@@ -396,8 +323,6 @@ recall :: proc(w: Well, T: typeid, allocator := context.temp_allocator) -> Query
 	}
 }
 
-// whose adds a condition (`where` is an Odin keyword). Write binds as `?`; they
-// are renumbered per dialect when rendered. Conditions combine with AND.
 whose :: proc(q: ^Query, condition: string, args: ..any) -> ^Query {
 	append(&q.wheres, condition)
 	for a in args {
@@ -406,20 +331,16 @@ whose :: proc(q: ^Query, condition: string, args: ..any) -> ^Query {
 	return q
 }
 
-// order_by sets the ORDER BY clause, e.g. order_by(&q, "name DESC").
 order_by :: proc(q: ^Query, clause: string) -> ^Query {
 	q.order = clause
 	return q
 }
 
-// limit caps the row count. A limit of 0 means unbounded.
 limit :: proc(q: ^Query, n: int) -> ^Query {
 	q.lim = n
 	return q
 }
 
-// sql renders the Query into a Statement, numbering placeholders for the
-// dialect across every `?` in the accumulated WHERE conditions.
 sql :: proc(q: ^Query, allocator := context.temp_allocator) -> Statement {
 	b := strings.builder_make(allocator)
 	fmt.sbprintf(&b, "SELECT %s FROM %s", q.columns, q.table)
@@ -451,12 +372,6 @@ sql :: proc(q: ^Query, allocator := context.temp_allocator) -> Statement {
 	return stmt
 }
 
-// ---------------------------------------------------------------------------
-// Placeholders — the injection-proof seam
-// ---------------------------------------------------------------------------
-
-// placeholder is the nth bind marker in the dialect: $n for Postgres (where
-// order matters), ? for MySQL and SQLite.
 placeholder :: proc(d: DB_Type, n: int) -> string {
 	if d == .Postgres {
 		return fmt.tprintf("$%d", n)
@@ -464,9 +379,6 @@ placeholder :: proc(d: DB_Type, n: int) -> string {
 	return "?"
 }
 
-// render_binds rewrites each `?` in a condition template to the dialect marker,
-// continuing the numbering from `start`. Returns the rendered string and the
-// next free index.
 render_binds :: proc(s: string, d: DB_Type, start: int, allocator := context.temp_allocator) -> (string, int) {
 	if d != .Postgres {
 		return strings.clone(s, allocator), start

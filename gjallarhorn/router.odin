@@ -4,9 +4,7 @@ package gjallarhorn
 
 import "core:strings"
 
-// Style A (decided): handlers are free procedures. Odin has no methods, no
-// UFCS and no closures, so there is no `self`/`app.Get(...)` to capture. The
-// app is always passed explicitly by pointer.
+
 Handler :: proc(b: ^Bifrost)
 
 Method :: enum {
@@ -25,9 +23,6 @@ Route :: struct {
 	handler: Handler,
 }
 
-// ---------------------------------------------------------------------------
-// Registration verbs
-// ---------------------------------------------------------------------------
 
 get :: proc(app: ^App, path: string, handler: Handler) {
 	append(&app.routes, Route{method = .Get, path = path, handler = handler})
@@ -44,10 +39,6 @@ put :: proc(app: ^App, path: string, handler: Handler) {
 delete :: proc(app: ^App, path: string, handler: Handler) {
 	append(&app.routes, Route{method = .Delete, path = path, handler = handler})
 }
-
-// ---------------------------------------------------------------------------
-// Dispatch
-// ---------------------------------------------------------------------------
 
 dispatch_route :: proc(b: ^Bifrost) {
 	for route in b._app.routes {

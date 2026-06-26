@@ -27,25 +27,16 @@ Pg_Conn :: struct {
 	open: bool,
 }
 
-// Rows: the text-format result of a query. NULL columns come back as "".
 Pg_Rows :: struct {
 	columns: []string,
 	rows:    [][]string,
 	tag:     string, // command tag, e.g. "INSERT 0 1"
 }
 
-// ---------------------------------------------------------------------------
-// Public surface (used from mimir.odin / handlers)
-// ---------------------------------------------------------------------------
-
-// connect opens the well: dials Postgres and runs the startup/auth handshake,
-// storing the live socket on the app. Returns false (and leaves pg.open false)
-// on any failure, so callers can fall back to offline behaviour.
 connect :: proc(app: ^App) -> bool {
 	return pg_open(&app.pg, app.postgres)
 }
 
-// disconnect closes the connection if open.
 disconnect :: proc(app: ^App) {
 	if app.pg.open {
 		net.close(app.pg.sock)
@@ -53,8 +44,6 @@ disconnect :: proc(app: ^App) {
 	}
 }
 
-// exec runs a statement and discards any rows, returning ok. For INSERT /
-// UPDATE / DELETE built by offer / amend / forget.
 exec :: proc(w: Well, stmt: Statement) -> bool {
 	if w.app == nil || !w.app.pg.open {
 		return false
@@ -63,18 +52,12 @@ exec :: proc(w: Well, stmt: Statement) -> bool {
 	return ok
 }
 
-// query runs a statement and returns its rows. For recall(...).sql — and for
-// offer(...), whose Postgres form carries RETURNING.
 query :: proc(w: Well, stmt: Statement, allocator := context.temp_allocator) -> (Pg_Rows, bool) {
 	if w.app == nil || !w.app.pg.open {
 		return {}, false
 	}
 	return pg_query(&w.app.pg, stmt.sql, stmt.args[:], allocator)
 }
-
-// ---------------------------------------------------------------------------
-// Connection + auth handshake
-// ---------------------------------------------------------------------------
 
 pg_open :: proc(conn: ^Pg_Conn, cfg: Postgres_Config) -> bool {
 	host := cfg.host
@@ -117,7 +100,6 @@ pg_startup :: proc(conn: ^Pg_Conn, cfg: Postgres_Config) -> bool {
 	}
 	append(&payload, 0) // end of parameter list
 
-	// StartupMessage has no type byte: just [len][payload].
 	msg := make([dynamic]u8, 0, 80, context.temp_allocator)
 	put_u32(&msg, u32(len(payload) + 4))
 	append(&msg, ..payload[:])
@@ -128,7 +110,6 @@ pg_startup :: proc(conn: ^Pg_Conn, cfg: Postgres_Config) -> bool {
 	return pg_auth(conn, cfg)
 }
 
-// pg_auth drives the handshake until ReadyForQuery, answering auth challenges.
 pg_auth :: proc(conn: ^Pg_Conn, cfg: Postgres_Config) -> bool {
 	for {
 		msg, ok := pg_read_msg(conn, context.temp_allocator)
@@ -172,10 +153,6 @@ pg_password :: proc(conn: ^Pg_Conn, password: string) -> bool {
 	return pg_send(conn, 'p', payload[:])
 }
 
-// ---------------------------------------------------------------------------
-// Simple query — used by migrate for parameter-free DDL
-// ---------------------------------------------------------------------------
-
 pg_simple :: proc(conn: ^Pg_Conn, sql: string) -> bool {
 	payload := make([dynamic]u8, 0, len(sql) + 8, context.temp_allocator)
 	put_str(&payload, sql)
@@ -199,10 +176,6 @@ pg_simple :: proc(conn: ^Pg_Conn, sql: string) -> bool {
 		}
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Extended query — Parse/Bind/Describe/Execute/Sync, with bound parameters
-// ---------------------------------------------------------------------------
 
 pg_query :: proc(conn: ^Pg_Conn, sql: string, args: []any, allocator := context.temp_allocator) -> (out: Pg_Rows, ok: bool) {
 	// Parse (unnamed statement, let the server infer parameter types).
@@ -359,10 +332,6 @@ pg_error_text :: proc(payload: []u8) -> string {
 	}
 	return fmt.tprintf("%s: %s (%s)", severity, message, code)
 }
-
-// ---------------------------------------------------------------------------
-// Byte helpers — big-endian writes, a cursor reader, MD5 auth
-// ---------------------------------------------------------------------------
 
 put_u32 :: proc(b: ^[dynamic]u8, v: u32) {
 	append(b, u8(v >> 24), u8(v >> 16), u8(v >> 8), u8(v))

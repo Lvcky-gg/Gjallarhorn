@@ -8,9 +8,7 @@ import "core:fmt"
 import "core:strings"
 
 run :: proc(app: ^App) {
-	// If a Postgres database is configured, open the well before serving so
-	// migrations (and handler queries) run against it. Failure is non-fatal:
-	// Mímir falls back to printing DDL so local dev works without a database.
+
 	if app.postgres.dbname != "" && !app.pg.open {
 		if connect(app) {
 			fmt.printfln("mimir: connected to postgres %s/%s", app.postgres.host, app.postgres.dbname)
@@ -19,8 +17,6 @@ run :: proc(app: ^App) {
 		}
 	}
 
-	// Auto-migrate: every remembered model's table is derived and applied
-	// before the first request. See mimir.odin.
 	migrate(app)
 
 	endpoint := net.Endpoint {
@@ -49,8 +45,7 @@ run :: proc(app: ^App) {
 	}
 }
 
-// Phase 1 security checkpoint: a fixed read buffer bounds the request line +
-// headers. Slowloris/read timeouts are a TODO once we move past blocking accept.
+
 MAX_REQUEST :: 8192
 
 handle_connection :: proc(app: ^App, client: net.TCP_Socket) {

@@ -32,13 +32,6 @@ import "core:fmt"
 import "core:strings"
 import "core:strconv"
 
-// ---------------------------------------------------------------------------
-// The data a template can see
-// ---------------------------------------------------------------------------
-
-// Value — the dynamic cell a template renders or branches on. Odin has no
-// `any`-ish runtime value the way Python does, so Loom carries its own. The
-// nil (no-variant) state is the template's `none`.
 Value :: union {
 	string,
 	int,
@@ -48,9 +41,6 @@ Value :: union {
 	map[string]Value,
 }
 
-// Warp — the named threads strung on the loom before weaving: the context a
-// template looks names up in. Plain alias (not distinct) so a nested map slots
-// straight into a `Value` for sub-objects. Build one with `warp`.
 Warp :: map[string]Value
 
 // Binding — one key/value thread, the argument shape of `warp`.
@@ -66,14 +56,6 @@ Loom_Error :: enum {
 	Bad_Syntax,     // e.g. {% for %} without "x in xs"
 }
 
-// ---------------------------------------------------------------------------
-// Public verbs
-// ---------------------------------------------------------------------------
-
-// warp: thread a context from key/value pairs, e.g.
-//   gh.warp({"title", "Gjallarhorn"}, {"user", gh.warp({"name", "Heimdallr"})})
-// A constructor (rather than a raw `Warp{…}` literal) so callers need neither
-// Odin's dynamic-literals feature flag nor explicit Value conversions.
 warp :: proc(bindings: ..Binding, allocator := context.allocator) -> Warp {
 	m := make(Warp, len(bindings), allocator)
 	for b in bindings {
@@ -82,21 +64,13 @@ warp :: proc(bindings: ..Binding, allocator := context.allocator) -> Warp {
 	return m
 }
 
-// list: thread an iterable for `{% for %}`, e.g.
-//   gh.list("urd", "verdandi", "skuld")
-// Copies the values into `allocator`-owned memory. Prefer this over a raw
-// `[]Value{…}` literal when the result outlives the call (e.g. returned from a
-// Provider): a slice literal's backing array lives on the stack and dangles
-// once the enclosing scope returns.
 list :: proc(vals: ..Value, allocator := context.allocator) -> []Value {
 	out := make([]Value, len(vals), allocator)
 	copy(out, vals)
 	return out
 }
 
-// weave: run `ctx` through template source `src`, returning the woven text in
-// `allocator`. The string-in / string-out core; `render` layers file loading
-// and the HTTP response on top.
+
 weave :: proc(src: string, ctx: Warp, allocator := context.allocator) -> (string, Loom_Error) {
 	toks := lex(src, context.temp_allocator)
 	p := Parser{toks = toks[:], pos = 0}
@@ -113,16 +87,10 @@ weave :: proc(src: string, ctx: Warp, allocator := context.allocator) -> (string
 	return strings.to_string(sb), .None
 }
 
-// html (Bifrost helper): send `body` as text/html, the sibling of `text` and
-// `json` over in bifrost.odin.
 html :: proc(b: ^Bifrost, status: int, body: string) {
 	write_response(b, status, "text/html; charset=utf-8", body)
 }
 
-// render (Bifrost helper): load a template file, weave `ctx` through it, and
-// send the result as HTML. `path` is supplied by the handler, not the request,
-// so this carries no traversal checkpoint of its own — see hail/serve_static
-// (static.odin) for the user-path case.
 render :: proc(b: ^Bifrost, path: string, ctx: Warp) {
 	data, err := os.read_entire_file(path, context.temp_allocator)
 	if err != nil {
@@ -137,35 +105,18 @@ render :: proc(b: ^Bifrost, path: string, ctx: Warp) {
 	html(b, 200, out)
 }
 
-// ---------------------------------------------------------------------------
-// Serving a directory of templates through hail
-// ---------------------------------------------------------------------------
-
-// Provider builds the context for a hail-served template, fresh per request, so
-// it can read b.path / params / the database. Build the Warp in
-// context.temp_allocator — the request frees it after the response.
 Provider :: proc(b: ^Bifrost) -> Warp
 
-// Loom_Mount: serve `dir` under `url_prefix`, weaving each file through Loom
-// with the context `provider` returns. The template-rendering sibling of
-// Static_Mount (static.odin). Register with `hail` (its four-arg form).
 Loom_Mount :: struct {
 	url_prefix: string,
 	dir:        string,
 	provider:   Provider, // may be nil -> rendered with an empty context
 }
 
-// hail_loom: the four-arg `hail` — mount a template directory. A request under
-// `url_prefix` resolves to a file in `dir`, which is woven and sent as HTML,
-// e.g. hail(&app, "/pages", "./templates", provider) maps GET /pages/x.html to
-// templates/x.html.
 hail_loom :: proc(app: ^App, url_prefix: string, dir: string, provider: Provider) {
 	append(&app.looms, Loom_Mount{url_prefix = url_prefix, dir = dir, provider = provider})
 }
 
-// serve_loom resolves a request to a template under the mount, weaves it, and
-// sends it. Returns false (so dispatch can 404) when the file is missing. Path
-// traversal is clamped by safe_target, the same checkpoint serve_static uses.
 serve_loom :: proc(b: ^Bifrost, mount: Loom_Mount) -> bool {
 	target, within := safe_target(mount.dir, mount.url_prefix, b.path)
 	if !within {
@@ -344,9 +295,6 @@ parse_if :: proc(p: ^Parser) -> (Node, Loom_Error) {
 	return node, .None
 }
 
-// parse_if_tail consumes the terminator parse_if stopped on and builds the
-// else branch. An `elif` is desugared into a nested If living in `alt`, so the
-// node model needs only condition / body / alt.
 parse_if_tail :: proc(p: ^Parser, term: string) -> ([dynamic]Node, Loom_Error) {
 	switch term {
 	case "endif":
@@ -413,10 +361,6 @@ parse_for :: proc(p: ^Parser) -> (Node, Loom_Error) {
 	return node, .None
 }
 
-// ---------------------------------------------------------------------------
-// Rendering the node tree
-// ---------------------------------------------------------------------------
-
 render_nodes :: proc(sb: ^strings.Builder, nodes: [dynamic]Node, ctx: ^Warp) -> Loom_Error {
 	for n in nodes {
 		switch n.kind {
@@ -438,8 +382,7 @@ render_nodes :: proc(sb: ^strings.Builder, nodes: [dynamic]Node, ctx: ^Warp) -> 
 	return .None
 }
 
-// render_output is the escape checkpoint: a value whose pipeline ended in
-// `safe`/`escape` is written verbatim, anything else is HTML-escaped.
+
 render_output :: proc(sb: ^strings.Builder, expr: string, ctx: ^Warp) {
 	e := eval(expr, ctx)
 	s := to_text(e.val)
@@ -457,7 +400,6 @@ render_for :: proc(sb: ^strings.Builder, n: Node, ctx: ^Warp) -> Loom_Error {
 		return render_nodes(sb, n.alt, ctx) // empty -> the {% else %} body
 	}
 
-	// Shadow the loop variable and `loop`, restoring whatever they hid after.
 	old_item, had_item := (ctx^)[n.ivar]
 	old_loop, had_loop := (ctx^)["loop"]
 	for item, i in arr {

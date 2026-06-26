@@ -1,8 +1,5 @@
 package gjallarhorn
 
-// bifrost.odin — the request/response object that crosses the bridge, plus the
-// helpers a handler calls on it. Named off "Context" so it never shadows
-// Odin's implicit `context`.
 
 import "core:net"
 import "core:strconv"
@@ -21,9 +18,6 @@ Bifrost :: struct {
 	_mw_index: int,
 }
 
-// ---------------------------------------------------------------------------
-// Path params
-// ---------------------------------------------------------------------------
 
 param :: proc(b: ^Bifrost, key: string) -> (string, bool) {
 	v, ok := b.params[key]
@@ -37,10 +31,6 @@ param_int :: proc(b: ^Bifrost, key: string) -> (int, bool) {
 	}
 	return strconv.parse_int(s)
 }
-
-// ---------------------------------------------------------------------------
-// Responses
-// ---------------------------------------------------------------------------
 
 text :: proc(b: ^Bifrost, status: int, body: string) {
 	write_response(b, status, "text/plain; charset=utf-8", body)

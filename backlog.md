@@ -156,6 +156,7 @@ single-threaded server, but incompatible with GH-010.
 **Component:** `mimir.odin`
 **Problem:** No FK DDL, joins, associations, or eager loading.
 **Done when:** at minimum a `db:"...,fk:other.id"` tag emits a FK constraint; a documented pattern (or helper) for join queries. Full association loading can be a follow-up.
+**DONE**
 
 ---
 

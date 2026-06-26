@@ -58,6 +58,7 @@ Column :: struct {
 	auto:    bool,
 	unique:  bool,
 	notnull: bool,
+	fk:      string, // foreign key target "table.column" (from db:"...,fk:t.c")
 }
 
 columns_of :: proc(T: typeid, allocator := context.temp_allocator) -> []Column {
@@ -75,11 +76,13 @@ columns_of :: proc(T: typeid, allocator := context.temp_allocator) -> []Column {
 				col.name = parts[0]
 			}
 			for flag in parts[1:] {
-				switch strings.trim_space(flag) {
-				case "pk":      col.pk = true
-				case "auto":    col.auto = true
-				case "unique":  col.unique = true
-				case "notnull": col.notnull = true
+				f := strings.trim_space(flag)
+				switch {
+				case f == "pk":      col.pk = true
+				case f == "auto":    col.auto = true
+				case f == "unique":  col.unique = true
+				case f == "notnull": col.notnull = true
+				case strings.has_prefix(f, "fk:"): col.fk = f[3:]
 				}
 			}
 		}
@@ -118,26 +121,41 @@ carve :: proc(w: Well, T: typeid, allocator := context.temp_allocator) -> string
 }
 
 column_ddl :: proc(d: DB_Type, col: Column) -> string {
+	sb := strings.builder_make(context.temp_allocator)
+
 	if col.pk && col.auto {
 		switch d {
-		case .Postgres: return "BIGSERIAL PRIMARY KEY"
-		case .MySQL:    return "BIGINT AUTO_INCREMENT PRIMARY KEY"
-		case .SQLite:   return "INTEGER PRIMARY KEY AUTOINCREMENT"
+		case .Postgres: strings.write_string(&sb, "BIGSERIAL PRIMARY KEY")
+		case .MySQL:    strings.write_string(&sb, "BIGINT AUTO_INCREMENT PRIMARY KEY")
+		case .SQLite:   strings.write_string(&sb, "INTEGER PRIMARY KEY AUTOINCREMENT")
+		}
+	} else {
+		strings.write_string(&sb, sql_type(d, col.type_id))
+		if col.pk {
+			strings.write_string(&sb, " PRIMARY KEY")
+		}
+		if col.unique {
+			strings.write_string(&sb, " UNIQUE")
+		}
+		if col.notnull && !col.pk {
+			strings.write_string(&sb, " NOT NULL")
 		}
 	}
 
-	sb := strings.builder_make(context.temp_allocator)
-	strings.write_string(&sb, sql_type(d, col.type_id))
-	if col.pk {
-		strings.write_string(&sb, " PRIMARY KEY")
-	}
-	if col.unique {
-		strings.write_string(&sb, " UNIQUE")
-	}
-	if col.notnull && !col.pk {
-		strings.write_string(&sb, " NOT NULL")
+	// A db:"...,fk:table.column" tag becomes an inline REFERENCES constraint.
+	if col.fk != "" {
+		strings.write_string(&sb, fk_clause(col.fk))
 	}
 	return strings.to_string(sb)
+}
+
+// fk_clause renders a foreign-key reference. The tag value is "table.column"
+// (or bare "table" to reference that table's primary key).
+fk_clause :: proc(ref: string) -> string {
+	if dot := strings.index(ref, "."); dot >= 0 {
+		return fmt.tprintf(" REFERENCES %s(%s)", ref[:dot], ref[dot + 1:])
+	}
+	return fmt.tprintf(" REFERENCES %s", ref)
 }
 
 sql_type :: proc(d: DB_Type, id: typeid) -> string {
@@ -389,6 +407,7 @@ Query :: struct {
 	dialect: DB_Type,
 	table:   string,
 	columns: string,        // comma-joined column list
+	joins:   [dynamic]string, // raw JOIN clauses, in order
 	wheres:  [dynamic]string, // condition templates, joined by AND; use ? for binds
 	args:    [dynamic]any,
 	order:   string,
@@ -406,6 +425,7 @@ recall :: proc(w: Well, T: typeid, allocator := context.temp_allocator) -> Query
 		dialect = w.dialect,
 		table   = table_name(T, allocator),
 		columns = strings.join(names[:], ", ", allocator),
+		joins   = make([dynamic]string, allocator),
 		wheres  = make([dynamic]string, allocator),
 		args    = make([dynamic]any, allocator),
 	}
@@ -416,6 +436,19 @@ whose :: proc(q: ^Query, condition: string, args: ..any) -> ^Query {
 	for a in args {
 		append(&q.args, a)
 	}
+	return q
+}
+
+// join appends a raw JOIN clause, the documented pattern for relational reads:
+//
+//	q := recall(w, Book)
+//	join(&q, "JOIN authors ON authors.id = books.author_id")
+//	whose(&q, "authors.name = ?", "Snorri")
+//
+// Clauses are raw SQL (no bind substitution); qualify ambiguous column names
+// yourself. Binds in `whose` keep numbering left-to-right across the WHERE.
+join :: proc(q: ^Query, clause: string) -> ^Query {
+	append(&q.joins, clause)
 	return q
 }
 
@@ -432,6 +465,10 @@ limit :: proc(q: ^Query, n: int) -> ^Query {
 sql :: proc(q: ^Query, allocator := context.temp_allocator) -> Statement {
 	b := strings.builder_make(allocator)
 	fmt.sbprintf(&b, "SELECT %s FROM %s", q.columns, q.table)
+
+	for j in q.joins {
+		fmt.sbprintf(&b, " %s", j)
+	}
 
 	if len(q.wheres) > 0 {
 		strings.write_string(&b, " WHERE ")

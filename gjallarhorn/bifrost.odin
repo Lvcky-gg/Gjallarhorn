@@ -3,15 +3,19 @@ package gjallarhorn
 
 import "core:net"
 import "core:strconv"
+import "core:strings"
 import "core:encoding/json"
 
 Bifrost :: struct {
-	method:    Method,
-	path:      string,
-	params:    map[string]string,
-	headers:   map[string]string, // response headers
-	client:    net.TCP_Socket,
-	written:   bool,
+	method:      Method,
+	path:        string,
+	params:      map[string]string,
+	headers:     map[string]string, // response headers
+	req_headers: map[string]string, // request headers, keys lower-cased
+	body:        []u8,              // raw request body
+	body_text:   string,            // body as a string view
+	client:      net.TCP_Socket,
+	written:     bool,
 
 	// Chain state, driven by `next`. Underscored: not for handler use.
 	_app:      ^App,
@@ -47,6 +51,36 @@ json :: proc(b: ^Bifrost, status: int, v: any) {
 
 not_found :: proc(b: ^Bifrost) {
 	text(b, 404, "404 not found")
+}
+
+// header reads a request header by name. Lookup is case-insensitive; parsed
+// keys are stored lower-cased, so the supplied key is lower-cased to match.
+header :: proc(b: ^Bifrost, key: string) -> (string, bool) {
+	lk := strings.to_lower(key, context.temp_allocator)
+	v, ok := b.req_headers[lk]
+	return v, ok
+}
+
+// parse_headers splits a CRLF-delimited header block into a map keyed by
+// lower-cased field name. Returns ok=false on a malformed line (no colon or
+// empty field name) so the caller can reject the request with a 400.
+parse_headers :: proc(block: string, allocator := context.allocator) -> (headers: map[string]string, ok: bool) {
+	headers = make(map[string]string, allocator)
+	for line in strings.split(block, "\r\n", allocator) {
+		if line == "" {
+			continue
+		}
+		colon := strings.index(line, ":")
+		if colon < 0 {
+			return headers, false
+		}
+		name := strings.to_lower(strings.trim_space(line[:colon]), allocator)
+		if name == "" {
+			return headers, false
+		}
+		headers[name] = strings.trim_space(line[colon + 1:])
+	}
+	return headers, true
 }
 
 set_header :: proc(b: ^Bifrost, key, value: string) {

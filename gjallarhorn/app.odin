@@ -31,15 +31,20 @@ Postgres_Config :: struct {
 	dbname:   string,
 }
 
+// DEFAULT_MAX_BODY caps request bodies when Config.max_body is left zero.
+DEFAULT_MAX_BODY :: 1 << 20 // 1 MiB
+
 Config :: struct {
 	port:     int,
 	root:     string,
 	db_type:  DB_Type,
 	postgres: Postgres_Config,
+	max_body: int, // largest request body accepted; 0 -> DEFAULT_MAX_BODY
 }
 
 App :: struct {
 	port:       int,
+	max_body:   int,         // largest request body accepted, in bytes
 	db_type:    DB_Type,     // dialect Mimir speaks; see mimir.odin
 	postgres:   Postgres_Config,
 	pg:         Pg_Conn,     // live connection; pg.open is false until connect()
@@ -51,5 +56,14 @@ App :: struct {
 }
 
 new :: proc(cfg: Config) -> App {
-	return App{port = cfg.port, db_type = cfg.db_type, postgres = cfg.postgres}
+	max_body := cfg.max_body
+	if max_body <= 0 {
+		max_body = DEFAULT_MAX_BODY
+	}
+	return App {
+		port     = cfg.port,
+		max_body = max_body,
+		db_type  = cfg.db_type,
+		postgres = cfg.postgres,
+	}
 }

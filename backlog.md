@@ -27,6 +27,7 @@ The `headers` map on `Bifrost` is response-only, so handlers can't read
 - A `header(b, key) -> (string, bool)` accessor exists.
 - Malformed header lines return `400` without crashing the loop.
 - A test covers multi-header parsing and a missing-header lookup.
+**DONE**
 
 ### GH-002 · Read full request body with Content-Length loop · **P0** · M
 **Component:** `server.odin`

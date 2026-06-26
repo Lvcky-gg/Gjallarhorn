@@ -50,6 +50,8 @@ status_text :: proc(status: int) -> string {
 		return "Forbidden"
 	case 404:
 		return "Not Found"
+	case 413:
+		return "Payload Too Large"
 	case 500:
 		return "Internal Server Error"
 	}

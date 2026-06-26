@@ -4,10 +4,51 @@ package gjallarhorn
 // the pipeline. Because Odin has no closures, the remaining chain is threaded
 // through the Bifrost (a cursor), not captured.
 
+import "base:runtime"
+import "core:c/libc"
 import "core:fmt"
 
 Next :: proc(b: ^Bifrost)
 Middleware :: proc(b: ^Bifrost, next: Next)
+
+// Panic recovery (GH-011). Odin has no native `recover`, so we route runtime
+// faults (panic, failed assert, bounds/nil checks) through a custom assertion
+// handler that longjmps back to a setjmp checkpoint armed per request. These
+// are thread-local: each worker recovers independently (see GH-010).
+@(thread_local) panic_jmp: libc.jmp_buf
+@(thread_local) panic_armed: bool
+
+// recovery_failure_proc replaces the default abort-the-process handler on
+// worker threads: it logs the fault, then unwinds to the armed checkpoint.
+// Outside a guarded section it falls back to the default (which aborts).
+recovery_failure_proc :: proc(prefix, message: string, loc: runtime.Source_Code_Location) -> ! {
+	fmt.eprintfln("gjallarhorn: recovered handler panic at %v: %s%s", loc, prefix, message)
+	if panic_armed {
+		panic_armed = false
+		libc.longjmp(&panic_jmp, 1)
+	}
+	runtime.default_assertion_failure_proc(prefix, message, loc)
+}
+
+// run_guarded runs the rune chain for one request under panic recovery. A
+// panic in any middleware or handler unwinds back here; we answer 500 (unless a
+// partial response already went out) and drop keep-alive so the connection is
+// closed rather than reused with corrupt framing.
+run_guarded :: proc(b: ^Bifrost) {
+	context.assertion_failure_proc = recovery_failure_proc
+	panic_armed = true
+	defer panic_armed = false
+
+	if libc.setjmp(&panic_jmp) == 0 {
+		next(b)
+	} else {
+		// Resumed here via longjmp: a handler faulted mid-request.
+		b.keep_alive = false
+		if !b.written {
+			write_response(b, 500, "text/plain; charset=utf-8", "500 internal server error")
+		}
+	}
+}
 
 // rune: inscribe a middleware onto the app. Runes run in registration order,
 // onion-style — outermost registered first, each wrapping everything after it.

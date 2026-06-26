@@ -96,7 +96,7 @@ handle_connection :: proc(app: ^App, client: net.TCP_Socket) {
 		}
 
 		b._app = app
-		next(&b)
+		run_guarded(&b) // panic recovery boundary (GH-011)
 		keep := b.keep_alive
 
 		// Drop this request's bytes; anything after belongs to the next one.

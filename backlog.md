@@ -94,6 +94,7 @@ connection at a time. A single slow client blocks the entire server.
 **Problem:** A crashing handler takes down the whole process; no isolation.
 **Depends on:** GH-010 (recovery boundary lives at the per-connection seam).
 **Done when:** a handler panic is caught, logged, and returns `500` without killing the server.
+**DONE**
 
 ### GH-012 · Bind to a configurable interface (not just loopback) · **P1** · S
 **Component:** `server.odin`, `app.odin`

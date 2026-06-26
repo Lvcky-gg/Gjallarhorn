@@ -65,6 +65,7 @@ URL (`POST /sample/:name`) purely to work around this.
 **Component:** `router.odin`
 **Problem:** `match_path` captures raw path segments; `%20` etc. are not decoded.
 **Done when:** captured params and the routed path are percent-decoded before handlers see them; test with an encoded segment.
+**DONE**
 
 ### GH-006 · HTTP keep-alive / connection reuse · **P1** · M
 **Component:** `server.odin`, `response.odin`

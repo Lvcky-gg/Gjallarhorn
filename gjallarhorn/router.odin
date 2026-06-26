@@ -47,6 +47,8 @@ dispatch_route :: proc(b: ^Bifrost) {
 		}
 		if params, ok := match_path(route.path, b.path); ok {
 			b.params = params
+			// Hand the handler a decoded path to match its decoded params.
+			b.path = percent_decode(b.path)
 			route.handler(b)
 			return
 		}
@@ -85,7 +87,9 @@ match_path :: proc(pattern, path: string) -> (params: map[string]string, ok: boo
 	params = make(map[string]string, context.temp_allocator)
 	for seg, i in p_segs {
 		if len(seg) > 0 && seg[0] == ':' {
-			params[seg[1:]] = u_segs[i]
+			// Capture the decoded value; matching stays on raw segments so an
+			// encoded slash (%2F) can't smuggle in an extra path segment.
+			params[seg[1:]] = percent_decode(u_segs[i])
 		} else if seg != u_segs[i] {
 			return nil, false
 		}

@@ -3,6 +3,7 @@ package gjallarhorn
 // body.odin — typed request-body decoders. Sits on top of the raw body that
 // server.odin assembles (b.body / b.body_text, see GH-002).
 
+import "base:runtime"
 import "core:encoding/json"
 import "core:strings"
 
@@ -45,16 +46,27 @@ parse_query :: proc(s: string, allocator := context.temp_allocator) -> map[strin
 // url_decode reverses x-www-form-urlencoded escaping: '+' -> space and %XX ->
 // the byte. A truncated or non-hex escape is preserved literally.
 url_decode :: proc(s: string, allocator := context.temp_allocator) -> string {
-	if strings.index_byte(s, '%') < 0 && strings.index_byte(s, '+') < 0 {
+	return decode_escapes(s, true, allocator)
+}
+
+// percent_decode handles %XX escapes only, leaving '+' literal. Used for path
+// segments and captured params (GH-005), where '+' is not a space.
+percent_decode :: proc(s: string, allocator := context.temp_allocator) -> string {
+	return decode_escapes(s, false, allocator)
+}
+
+@(private)
+decode_escapes :: proc(s: string, plus_as_space: bool, allocator: runtime.Allocator) -> string {
+	if strings.index_byte(s, '%') < 0 && !(plus_as_space && strings.index_byte(s, '+') >= 0) {
 		return s
 	}
 	sb := strings.builder_make(allocator)
 	for i := 0; i < len(s); {
-		switch s[i] {
-		case '+':
+		switch {
+		case s[i] == '+' && plus_as_space:
 			strings.write_byte(&sb, ' ')
 			i += 1
-		case '%':
+		case s[i] == '%':
 			hi, lo := -1, -1
 			if i + 2 < len(s) {
 				hi, lo = hex_val(s[i + 1]), hex_val(s[i + 2])

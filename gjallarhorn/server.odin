@@ -8,6 +8,7 @@ import "core:net"
 import "core:fmt"
 import "core:strings"
 import "core:strconv"
+import "core:thread"
 import "core:time"
 
 run :: proc(app: ^App) {
@@ -36,16 +37,27 @@ run :: proc(app: ^App) {
 
 	fmt.printfln("gjallarhorn: listening on http://127.0.0.1:%d", app.port)
 
+	// One thread per connection. accept_tcp is the only thing the accept loop
+	// blocks on; request handling (which may stall on a slow client) is pushed
+	// onto a self-cleaning worker thread, so a slow peer never holds the loop.
 	for {
 		client, _, accept_err := net.accept_tcp(sock)
 		if accept_err != nil {
 			fmt.eprintfln("gjallarhorn: accept error: %v", accept_err)
 			continue
 		}
-		handle_connection(app, client)
-		net.close(client)
-		free_all(context.temp_allocator)
+		thread.run_with_poly_data2(app, client, handle_worker)
 	}
+}
+
+// handle_worker is the per-connection thread body. Each worker runs with its
+// own context (and thus its own thread-local temp allocator), so the per-request
+// free_all inside handle_connection only ever reclaims this worker's arena —
+// safe under concurrency.
+handle_worker :: proc(app: ^App, client: net.TCP_Socket) {
+	handle_connection(app, client)
+	net.close(client)
+	free_all(context.temp_allocator)
 }
 
 

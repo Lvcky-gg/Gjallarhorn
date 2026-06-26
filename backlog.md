@@ -87,6 +87,7 @@ connection at a time. A single slow client blocks the entire server.
 - The accept loop never blocks on request handling.
 - `free_all(context.temp_allocator)` is made per-handler-safe (it currently assumes single-threaded temp-allocator reuse — this WILL break under threads and must be addressed as part of this ticket).
 - Load test: N concurrent slow clients don't stall fast ones.
+**DONE**
 
 ### GH-011 · Panic recovery per request · **P1** · S
 **Component:** `server.odin`, `middleware.odin`

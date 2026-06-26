@@ -59,6 +59,7 @@ URL (`POST /sample/:name`) purely to work around this.
 **Done when:**
 - `?k=v&...` is parsed into `b.query: map[string]string` (URL-decoded).
 - `query(b, key) -> (string, bool)` accessor + test.
+**DONE**
 
 ### GH-005 · Percent-decode path and param values · **P1** · S
 **Component:** `router.odin`

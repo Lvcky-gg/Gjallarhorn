@@ -52,7 +52,7 @@ exec :: proc(w: Well, stmt: Statement) -> bool {
 	return ok
 }
 
-query :: proc(w: Well, stmt: Statement, allocator := context.temp_allocator) -> (Pg_Rows, bool) {
+query_well :: proc(w: Well, stmt: Statement, allocator := context.temp_allocator) -> (Pg_Rows, bool) {
 	if w.app == nil || !w.app.pg.open {
 		return {}, false
 	}

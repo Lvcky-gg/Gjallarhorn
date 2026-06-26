@@ -113,9 +113,12 @@ recv_request :: proc(
 		return {}, 400, false
 	}
 
-	// Strip query string; routing is on path only for now.
+	// Split the target into path (used for routing) and query string. The
+	// query reuses the urlencoded decoder, since the syntax is the same.
 	path := parts[1]
+	query: map[string]string
 	if q := strings.index(path, "?"); q >= 0 {
+		query = parse_query(path[q + 1:], allocator)
 		path = path[:q]
 	}
 
@@ -158,6 +161,7 @@ recv_request :: proc(
 	b = Bifrost {
 		method      = method,
 		path        = path,
+		query       = query,
 		req_headers = req_headers,
 		body        = body,
 		body_text   = string(body),

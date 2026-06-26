@@ -10,6 +10,8 @@ Bifrost :: struct {
 	method:      Method,
 	path:        string,
 	params:      map[string]string,
+	query:       map[string]string, // URL-decoded query-string params
+
 	headers:     map[string]string, // response headers
 	req_headers: map[string]string, // request headers, keys lower-cased
 	body:        []u8,              // raw request body
@@ -26,6 +28,18 @@ Bifrost :: struct {
 param :: proc(b: ^Bifrost, key: string) -> (string, bool) {
 	v, ok := b.params[key]
 	return v, ok
+}
+
+// query reads a URL-decoded query-string param. Part of the `query` overload
+// group (see query_well for the database statement runner).
+query_param :: proc(b: ^Bifrost, key: string) -> (string, bool) {
+	v, ok := b.query[key]
+	return v, ok
+}
+
+query :: proc {
+	query_well,
+	query_param,
 }
 
 param_int :: proc(b: ^Bifrost, key: string) -> (int, bool) {

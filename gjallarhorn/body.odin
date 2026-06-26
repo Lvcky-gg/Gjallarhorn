@@ -21,8 +21,15 @@ bind_json :: proc(b: ^Bifrost, ptr: ^$T) -> bool {
 // values are percent- and '+'-decoded. Lenient by design: blank pairs are
 // skipped and a malformed percent-escape is left literal rather than failing.
 form :: proc(b: ^Bifrost, allocator := context.temp_allocator) -> map[string]string {
+	return parse_query(b.body_text, allocator)
+}
+
+// parse_query decodes an `&`-separated, urlencoded key=value sequence into a
+// map. Shared by form bodies and query strings (GH-004), which use the same
+// syntax. Keys and values are percent- and '+'-decoded.
+parse_query :: proc(s: string, allocator := context.temp_allocator) -> map[string]string {
 	out := make(map[string]string, allocator)
-	for pair in strings.split(b.body_text, "&", allocator) {
+	for pair in strings.split(s, "&", allocator) {
 		if pair == "" {
 			continue
 		}

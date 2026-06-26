@@ -8,7 +8,7 @@ import "sample"
 main :: proc() {
 	app := gh.new(gh.Config{
 		port    = 8091,
-		root    = "/",
+		// host left empty -> bind to loopback. Set e.g. "0.0.0.0" to expose.
 		db_type = .Postgres,
 		// Set a dbname to go live: run() then connects and auto-migrates every
 		// remembered model into real tables. Left empty, migrations just print.

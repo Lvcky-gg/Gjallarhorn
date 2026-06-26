@@ -24,18 +24,18 @@ run :: proc(app: ^App) {
 	migrate(app)
 
 	endpoint := net.Endpoint {
-		address = net.IP4_Loopback,
+		address = bind_address(app.host),
 		port    = app.port,
 	}
 
 	sock, err := net.listen_tcp(endpoint)
 	if err != nil {
-		fmt.eprintfln("gjallarhorn: listen failed on port %d: %v", app.port, err)
+		fmt.eprintfln("gjallarhorn: listen failed on %v: %v", endpoint, err)
 		return
 	}
 	defer net.close(sock)
 
-	fmt.printfln("gjallarhorn: listening on http://127.0.0.1:%d", app.port)
+	fmt.printfln("gjallarhorn: listening on http://%v", net.endpoint_to_string(endpoint))
 
 	// One thread per connection. accept_tcp is the only thing the accept loop
 	// blocks on; request handling (which may stall on a slow client) is pushed
@@ -48,6 +48,21 @@ run :: proc(app: ^App) {
 		}
 		thread.run_with_poly_data2(app, client, handle_worker)
 	}
+}
+
+// bind_address resolves the configured host to an address to listen on. An
+// empty host means loopback (127.0.0.1); "0.0.0.0" opens all interfaces. An
+// unparseable host falls back to loopback with a warning rather than binding
+// the world by accident.
+bind_address :: proc(host: string) -> net.Address {
+	if host == "" {
+		return net.IP4_Loopback
+	}
+	if addr, ok := net.parse_ip4_address(host); ok {
+		return addr
+	}
+	fmt.eprintfln("gjallarhorn: invalid host %q, falling back to loopback", host)
+	return net.IP4_Loopback
 }
 
 // handle_worker is the per-connection thread body. Each worker runs with its

@@ -35,14 +35,15 @@ Postgres_Config :: struct {
 DEFAULT_MAX_BODY :: 1 << 20 // 1 MiB
 
 Config :: struct {
+	host:     string, // bind address, e.g. "0.0.0.0"; empty -> loopback
 	port:     int,
-	root:     string,
 	db_type:  DB_Type,
 	postgres: Postgres_Config,
 	max_body: int, // largest request body accepted; 0 -> DEFAULT_MAX_BODY
 }
 
 App :: struct {
+	host:       string,      // bind address; empty -> loopback (see server.odin)
 	port:       int,
 	max_body:   int,         // largest request body accepted, in bytes
 	db_type:    DB_Type,     // dialect Mimir speaks; see mimir.odin
@@ -61,6 +62,7 @@ new :: proc(cfg: Config) -> App {
 		max_body = DEFAULT_MAX_BODY
 	}
 	return App {
+		host     = cfg.host,
 		port     = cfg.port,
 		max_body = max_body,
 		db_type  = cfg.db_type,

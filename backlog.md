@@ -100,6 +100,7 @@ connection at a time. A single slow client blocks the entire server.
 **Component:** `server.odin`, `app.odin`
 **Problem:** `net.IP4_Loopback` is hardcoded; `Config.root` is set but never used.
 **Done when:** host/bind address is configurable (default loopback); `Config.root` is either wired up or removed.
+**DONE**
 
 ---
 

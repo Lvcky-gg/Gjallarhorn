@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+
+#
+set -euo pipefail
+
+root="$(git rev-parse --show-toplevel)"
+cd "$root"
+
+
+if git diff --cached --quiet -- '*.odin'; then
+	echo "pre-commit: no staged .odin changes — skipping build/test checks."
+	exit 0
+fi
+
+command -v odin >/dev/null 2>&1 || {
+	echo "pre-commit: 'odin' is not on PATH — install the Odin compiler." >&2
+	exit 1
+}
+
+echo "pre-commit: type-checking (default build)…"
+odin check . >/dev/null
+
+echo "pre-commit: type-checking (TLS build, -define:GJ_TLS=true)…"
+odin check . -define:GJ_TLS=true >/dev/null
+
+pg_up() { (exec 3<>/dev/tcp/127.0.0.1/5432) 2>/dev/null; }
+
+if ! pg_up; then
+	echo "pre-commit: Postgres not reachable on :5432 — starting it via docker compose…"
+
+	if docker compose version >/dev/null 2>&1; then
+		compose() { docker compose "$@"; }
+	elif command -v docker-compose >/dev/null 2>&1; then
+		compose() { docker-compose "$@"; }
+	else
+		echo "pre-commit: no docker compose available — start Postgres yourself, then retry." >&2
+		exit 1
+	fi
+
+	compose up -d || { echo "pre-commit: 'compose up -d' failed." >&2; exit 1; }
+
+	echo -n "pre-commit: waiting for Postgres to accept connections"
+	for _ in $(seq 1 30); do
+		if compose exec -T db pg_isready -U app -d gjallarhorn >/dev/null 2>&1; then
+			echo " — ready."
+			break
+		fi
+		echo -n "."
+		sleep 1
+	done
+	if ! compose exec -T db pg_isready -U app -d gjallarhorn >/dev/null 2>&1; then
+		echo $'\npre-commit: Postgres did not become ready in time.' >&2
+		exit 1
+	fi
+fi
+
+echo "pre-commit: running tests…"
+odin test ./tests
+
+echo "pre-commit: all checks passed."

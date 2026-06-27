@@ -4,9 +4,7 @@ package gjallarhorn
 
 import "core:strings"
 
-// Style A (decided): handlers are free procedures. Odin has no methods, no
-// UFCS and no closures, so there is no `self`/`app.Get(...)` to capture. The
-// app is always passed explicitly by pointer.
+
 Handler :: proc(b: ^Bifrost)
 
 Method :: enum {
@@ -25,9 +23,6 @@ Route :: struct {
 	handler: Handler,
 }
 
-// ---------------------------------------------------------------------------
-// Registration verbs
-// ---------------------------------------------------------------------------
 
 get :: proc(app: ^App, path: string, handler: Handler) {
 	append(&app.routes, Route{method = .Get, path = path, handler = handler})
@@ -45,10 +40,6 @@ delete :: proc(app: ^App, path: string, handler: Handler) {
 	append(&app.routes, Route{method = .Delete, path = path, handler = handler})
 }
 
-// ---------------------------------------------------------------------------
-// Dispatch
-// ---------------------------------------------------------------------------
-
 dispatch_route :: proc(b: ^Bifrost) {
 	for route in b._app.routes {
 		if route.method != b.method {
@@ -56,13 +47,23 @@ dispatch_route :: proc(b: ^Bifrost) {
 		}
 		if params, ok := match_path(route.path, b.path); ok {
 			b.params = params
+			// Hand the handler a decoded path to match its decoded params.
+			b.path = percent_decode(b.path)
 			route.handler(b)
 			return
 		}
 	}
 
-	// Static mounts (GET only). First mount whose prefix matches handles it.
+	// Mounts (GET only). First mount whose prefix matches handles it; template
+	// mounts are tried before raw static ones.
 	if b.method == .Get {
+		for mount in b._app.looms {
+			if under_prefix(b.path, mount.url_prefix) {
+				if serve_loom(b, mount) {
+					return
+				}
+			}
+		}
 		for mount in b._app.statics {
 			if under_prefix(b.path, mount.url_prefix) {
 				if serve_static(b, mount) {
@@ -86,7 +87,9 @@ match_path :: proc(pattern, path: string) -> (params: map[string]string, ok: boo
 	params = make(map[string]string, context.temp_allocator)
 	for seg, i in p_segs {
 		if len(seg) > 0 && seg[0] == ':' {
-			params[seg[1:]] = u_segs[i]
+			// Capture the decoded value; matching stays on raw segments so an
+			// encoded slash (%2F) can't smuggle in an extra path segment.
+			params[seg[1:]] = percent_decode(u_segs[i])
 		} else if seg != u_segs[i] {
 			return nil, false
 		}

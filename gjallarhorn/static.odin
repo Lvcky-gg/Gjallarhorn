@@ -13,10 +13,17 @@ Static_Mount :: struct {
 	dir:        string,
 }
 
-// hail: a GET that serves static files from `dir` under `url_prefix`, e.g.
-// hail(&app, "/static", "./public"). Explicit routes win; static mounts are
-// tried only when no route matches. Path traversal is clamped in serve_static.
-hail :: proc(app: ^App, url_prefix: string, dir: string) {
+// hail: a GET that serves files from `dir` under `url_prefix`. Two shapes:
+//
+//   hail(&app, "/static", "./public")             raw files
+//   hail(&app, "/pages",  "./templates", provider) files woven by Loom
+//
+// The four-arg form is hail_loom over in loom.odin. Explicit routes win; mounts
+// are tried only when no route matches. Path traversal is clamped in
+// safe_target, shared by both serve_static and serve_loom.
+hail :: proc{hail_static, hail_loom}
+
+hail_static :: proc(app: ^App, url_prefix: string, dir: string) {
 	append(&app.statics, Static_Mount{url_prefix = url_prefix, dir = dir})
 }
 
@@ -34,18 +41,8 @@ under_prefix :: proc(path, prefix: string) -> bool {
 // missing. Path traversal is the security checkpoint for this phase: the
 // resolved path is cleaned and must stay inside the mount root, otherwise 403.
 serve_static :: proc(b: ^Bifrost, mount: Static_Mount) -> bool {
-	rel := strings.trim_prefix(b.path[len(mount.url_prefix):], "/")
-	if rel == "" {
-		rel = "index.html"
-	}
-
-	root, _ := filepath.clean(mount.dir, context.temp_allocator)
-	// Join, then clean: any ".." in `rel` is collapsed here so the containment
-	// check below sees the real target, not the literal "../" string.
-	joined, _ := filepath.join({root, rel}, context.temp_allocator)
-	target, _ := filepath.clean(joined, context.temp_allocator)
-
-	if !within_root(root, target) {
+	target, within := safe_target(mount.dir, mount.url_prefix, b.path)
+	if !within {
 		text(b, 403, "403 forbidden")
 		return true
 	}
@@ -63,6 +60,24 @@ serve_static :: proc(b: ^Bifrost, mount: Static_Mount) -> bool {
 
 	write_response(b, 200, content_type_for(filepath.ext(target)), string(data))
 	return true
+}
+
+// safe_target maps a request path to a cleaned file path inside the mount root,
+// defaulting a bare directory request to index.html. `within` is false when the
+// path would escape the root — the traversal checkpoint both mounts rely on.
+safe_target :: proc(dir, url_prefix, req_path: string) -> (target: string, within: bool) {
+	rel := strings.trim_prefix(req_path[len(url_prefix):], "/")
+	if rel == "" {
+		rel = "index.html"
+	}
+
+	root, _ := filepath.clean(dir, context.temp_allocator)
+	// Join, then clean: any ".." in `rel` is collapsed here so the containment
+	// check below sees the real target, not the literal "../" string.
+	joined, _ := filepath.join({root, rel}, context.temp_allocator)
+	target, _ = filepath.clean(joined, context.temp_allocator)
+	within = within_root(root, target)
+	return
 }
 
 // within_root: `target` must be the root itself or sit beneath it on a

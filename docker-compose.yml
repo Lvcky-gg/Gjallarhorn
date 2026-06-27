@@ -1,0 +1,30 @@
+# docker-compose.yml — a Postgres for testing Mímir, gjallarhorn's ORM.
+#
+# This runs a default-configured Postgres 16, which authenticates host
+# connections with scram-sha-256. Mímir's from-scratch wire-protocol client
+# (gjallarhorn/postgres.odin) implements the SCRAM-SHA-256 handshake (GH-030),
+# so no pg_hba downgrade to trust/md5 is required — the password below is used
+# for real.
+#
+# Usage:
+#   docker compose up -d        # Postgres on localhost:5432
+#   odin run .                  # app connects, auto-migrates, serves :8091
+#   docker compose down         # stop + remove (data is ephemeral)
+#
+# Database/user/password match the Postgres_Config in main.odin.
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: gjallarhorn-db
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: gjallarhorn
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d gjallarhorn"]
+      interval: 2s
+      timeout: 3s
+      retries: 20

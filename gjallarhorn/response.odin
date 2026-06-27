@@ -16,16 +16,24 @@ write_response :: proc(b: ^Bifrost, status: int, content_type: string, body: str
 	for key, value in b.headers {
 		fmt.sbprintf(&sb, "%s: %s\r\n", key, value)
 	}
+	for c in b.cookies {
+		fmt.sbprintf(&sb, "Set-Cookie: %s\r\n", c)
+	}
 	fmt.sbprintf(&sb, "Content-Length: %d\r\n", len(body))
-	fmt.sbprint(&sb, "Connection: close\r\n\r\n")
+	if b.keep_alive {
+		fmt.sbprint(&sb, "Connection: keep-alive\r\n\r\n")
+	} else {
+		fmt.sbprint(&sb, "Connection: close\r\n\r\n")
+	}
 	fmt.sbprint(&sb, body)
 
-	net.send_tcp(b.client, transmute([]u8)strings.to_string(sb))
+	wire_send(b.client, b.ssl, transmute([]u8)strings.to_string(sb))
 	b.written = true
 }
 
-// For early-exit error paths that have no Bifrost yet.
-send_raw :: proc(client: net.TCP_Socket, status: int, body: string) {
+// For early-exit error paths that have no Bifrost yet. `ssl` is the connection's
+// TLS session (nil for plaintext), so the error still goes out over HTTPS.
+send_raw :: proc(client: net.TCP_Socket, ssl: rawptr, status: int, body: string) {
 	resp := fmt.tprintf(
 		"HTTP/1.1 %d %s\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s",
 		status,
@@ -33,7 +41,7 @@ send_raw :: proc(client: net.TCP_Socket, status: int, body: string) {
 		len(body),
 		body,
 	)
-	net.send_tcp(client, transmute([]u8)resp)
+	wire_send(client, ssl, transmute([]u8)resp)
 }
 
 status_text :: proc(status: int) -> string {
@@ -50,6 +58,8 @@ status_text :: proc(status: int) -> string {
 		return "Forbidden"
 	case 404:
 		return "Not Found"
+	case 413:
+		return "Payload Too Large"
 	case 500:
 		return "Internal Server Error"
 	}

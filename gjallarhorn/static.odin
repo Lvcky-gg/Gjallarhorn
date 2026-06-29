@@ -30,6 +30,9 @@ hail_static :: proc(app: ^App, url_prefix: string, dir: string) {
 // under_prefix reports whether `path` falls under `prefix` on a segment
 // boundary, so prefix "/static" matches "/static/x" but not "/staticfoo".
 under_prefix :: proc(path, prefix: string) -> bool {
+		if prefix == "/" {
+		return true // root mount: every path is under it
+	}
 	if path == prefix {
 		return true
 	}

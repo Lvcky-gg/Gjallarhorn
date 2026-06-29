@@ -558,13 +558,6 @@ main :: proc() {
 }
 ```
 
-```sh
-perl ./install-deps.perl                                   # fetch the framework
-cd ./gjallar-example && npm install && npm run build && cd ..
-odin run .                                                 # serve on :3000
-# open http://localhost:3000/test/
-```
-
 The one thing that must line up is the **mount path and the build's asset base**:
 Vite's `base` (in `vite.config.*`) has to match the `hail` prefix, or the bundle's
 `/assets/…` URLs 404. With `hail(&app, "/test", …)`, set `base: "/test/"`.

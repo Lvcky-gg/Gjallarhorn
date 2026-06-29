@@ -45,6 +45,10 @@ curl http://127.0.0.1:8091/pages/hello.html  # a Loom-rendered template
 curl http://127.0.0.1:8091/docs              # the static docs site
 ```
 
+Want to put a real frontend in front of it? See
+[Serving a frontend framework](#serving-a-frontend-framework-vue-react-) and the
+companion [Vue + Vite example](https://github.com/Lvcky-gg/gjallar_vue_example).
+
 ---
 
 ## Install — use it in your own project
@@ -525,6 +529,51 @@ share one `tls.odin` module.
 *Scope:* a single listener is HTTP **or** HTTPS (no dual-port and no HTTP→HTTPS
 redirect); `.Verify_Full` trusts the system CA bundle (no custom-CA option yet);
 certs load once at boot (no hot reload on renewal).
+
+---
+
+## Serving a frontend framework (Vue, React, …)
+
+Gjallarhorn can be the only server in front of a modern SPA: build the frontend
+to static assets and let `hail` serve them. There's no separate Node server in
+production — the Odin binary serves the framework's compiled bundle directly.
+
+A worked example lives in its own repo,
+**[gjallar_vue_example](https://github.com/Lvcky-gg/gjallar_vue_example)** — a
+Vue 3 + Vite app built to `dist/` and served by Gjallarhorn:
+
+```odin
+package main
+
+import gh "gjallarhorn"
+
+main :: proc() {
+    app := gh.new(gh.Config{port = 3000})
+
+    // Serve the Vite build output under /test. A bare directory request
+    // (GET /test/) falls back to the bundle's index.html.
+    gh.hail(&app, "/test", "./gjallar-example/dist/")
+
+    gh.run(&app)
+}
+```
+
+```sh
+perl ./install-deps.perl                                   # fetch the framework
+cd ./gjallar-example && npm install && npm run build && cd ..
+odin run .                                                 # serve on :3000
+# open http://localhost:3000/test/
+```
+
+The one thing that must line up is the **mount path and the build's asset base**:
+Vite's `base` (in `vite.config.*`) has to match the `hail` prefix, or the bundle's
+`/assets/…` URLs 404. With `hail(&app, "/test", …)`, set `base: "/test/"`.
+
+The same pattern works for any framework that builds to a static directory
+(React/Vite, Svelte, plain `esbuild` output): point `hail` at the build folder.
+You can also mix it with API routes — register your `gh.get`/`gh.post` handlers
+under, say, `/api/…` and mount the SPA under `/`, since explicit routes are
+matched before static mounts.
 
 ---
 

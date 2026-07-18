@@ -7,10 +7,12 @@
       "Bash(rg -n \"^run ::|run ::|^serve ::\" gjallarhorn/*.odin)",
       "Bash(echo \"exit=$?\")",
       "Bash(echo \"release_exit=$?\")",
-      "Bash(echo \"test_exit=$?\")"
+      "Bash(echo \"test_exit=$?\")",
+      "Bash(echo \"build_exit=$?\")"
     ],
     "additionalDirectories": [
-      "/home/lvcky/Documents/obsidian/Brain/04_Coding/Solutions"
+      "/home/lvcky/Documents/obsidian/Brain/04_Coding/Solutions",
+      "/home/lvcky/Documents/obsidian/Brain/04_Coding"
     ]
   }
 }

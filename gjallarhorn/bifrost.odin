@@ -109,7 +109,27 @@ set_header :: proc(b: ^Bifrost, key, value: string) {
 	if b.headers == nil {
 		b.headers = make(map[string]string, context.temp_allocator)
 	}
-	b.headers[key] = value
+	// Strip CR/LF so a user-influenced key or value can't inject extra header
+	// lines or split the response — CRLF injection (GH-052).
+	b.headers[strip_crlf(key)] = strip_crlf(value)
+}
+
+// strip_crlf removes CR and LF bytes from a header/cookie field, the single
+// guard against CRLF injection on the response-write path. A value carrying
+// `\r\n` could otherwise inject its own header lines or split the response. The
+// common case (no control bytes) returns the input untouched with no allocation.
+strip_crlf :: proc(s: string, allocator := context.temp_allocator) -> string {
+	if strings.index_byte(s, '\r') < 0 && strings.index_byte(s, '\n') < 0 {
+		return s
+	}
+	sb := strings.builder_make(allocator)
+	for i in 0 ..< len(s) {
+		if s[i] == '\r' || s[i] == '\n' {
+			continue
+		}
+		strings.write_byte(&sb, s[i])
+	}
+	return strings.to_string(sb)
 }
 
 // ---------------------------------------------------------------------------
@@ -196,5 +216,7 @@ set_cookie :: proc(b: ^Bifrost, name, value: string, opts := Cookie_Options{}) {
 	if b.cookies == nil {
 		b.cookies = make([dynamic]string, context.temp_allocator)
 	}
-	append(&b.cookies, strings.to_string(sb))
+	// Strip CR/LF from the assembled line so no cookie attribute (name, value,
+	// path, domain) can inject a header or split the response (GH-052).
+	append(&b.cookies, strip_crlf(strings.to_string(sb)))
 }

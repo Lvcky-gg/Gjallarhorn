@@ -21,7 +21,12 @@
       "Bash(rg -n \"Method ::|\\\\.Get|\\\\.Post|\\\\.Put|\\\\.Delete|\\\\.Options|\\\\.Head|parse_method\" gjallarhorn/*.odin)",
       "Read(//usr/lib/odin/core/crypto/**)",
       "Bash(git add *)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(command -v python3)",
+      "Bash(pkill -9 -f ghsrv)",
+      "Bash(pkill -9 -f gh_rel)",
+      "Bash(/tmp/claude-1000/-home-lvcky-gjallarhorn/5d612541-cf5c-4f4b-bff2-a52d8c799c7d/scratchpad/ghsrv)",
+      "Bash(fuser -k 8091/tcp)"
     ],
     "additionalDirectories": [
       "/home/lvcky/Documents/obsidian/Brain/04_Coding/Solutions",

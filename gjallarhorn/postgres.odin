@@ -169,6 +169,14 @@ pool_close :: proc(pool: ^Pg_Pool) {
 	pool.open = false
 }
 
+// borrowed_conns tracks the pool connections this worker thread currently holds.
+// A request is served entirely on one worker, and Odin `defer` does NOT run when
+// a panic unwinds via longjmp (GH-011) — so the normal pool_release (deferred in
+// tx/pin, explicit in query_well) is skipped on a fault, and the connection would
+// leak until the pool bleeds dry and wedges. run_guarded calls
+// reclaim_borrowed_conns on the way out to hand them back (GH-010).
+@(thread_local) borrowed_conns: [dynamic]^Pg_Conn
+
 // pool_acquire blocks until a connection is free, then hands it out.
 pool_acquire :: proc(pool: ^Pg_Pool) -> (^Pg_Conn, bool) {
 	if !pool.open {
@@ -178,15 +186,67 @@ pool_acquire :: proc(pool: ^Pg_Pool) -> (^Pg_Conn, bool) {
 	sync.mutex_lock(&pool.mutex)
 	idx := pop(&pool.available)
 	sync.mutex_unlock(&pool.mutex)
-	return &pool.conns[idx], true
+	conn := &pool.conns[idx]
+	append(&borrowed_conns, conn) // track for panic-path reclamation (GH-010)
+	return conn, true
 }
 
 // pool_release returns a connection to the free-list and wakes one waiter.
 pool_release :: proc(pool: ^Pg_Pool, conn: ^Pg_Conn) {
+	untrack_borrow(conn) // a normal release: no longer needs reclaiming
 	sync.mutex_lock(&pool.mutex)
 	append(&pool.available, conn.idx)
 	sync.mutex_unlock(&pool.mutex)
 	sync.sema_post(&pool.sem)
+}
+
+// untrack_borrow drops one connection from this worker's borrow set on a normal
+// release. A no-op if it isn't tracked (e.g. acquired before tracking existed).
+untrack_borrow :: proc(conn: ^Pg_Conn) {
+	for c, i in borrowed_conns {
+		if c == conn {
+			unordered_remove(&borrowed_conns, i)
+			return
+		}
+	}
+}
+
+// reclaim_borrowed_conns returns every pool connection this worker still holds
+// and clears the tracking. It runs at the end of every request: a no-op on the
+// normal path (releases already ran), and the safety net on the panic-recovery
+// path, where longjmp skipped them. Each reclaimed connection is reset first,
+// since a fault can leave it mid-query or mid-transaction (see reset_conn).
+reclaim_borrowed_conns :: proc(app: ^App) {
+	if len(borrowed_conns) == 0 {
+		return
+	}
+	defer clear(&borrowed_conns)
+	if app == nil || !app.pool.open {
+		return // no pool to return to; just drop the tracking
+	}
+	for conn in borrowed_conns {
+		reset_conn(conn, app.postgres) // no locks held: reset does network I/O
+		sync.mutex_lock(&app.pool.mutex)
+		append(&app.pool.available, conn.idx)
+		sync.mutex_unlock(&app.pool.mutex)
+		sync.sema_post(&app.pool.sem)
+	}
+}
+
+// reset_conn restores a reclaimed connection to a clean state before it re-enters
+// the pool. A panic can unwind mid-query (unread bytes left on the socket) or
+// mid-transaction (BEGIN with no COMMIT/ROLLBACK); reusing such a connection
+// would corrupt the next borrower's results. Close-and-reopen is the one reset
+// that is safe wherever the fault hit. Best-effort: a failed reopen leaves the
+// connection closed, so a later query fails cleanly rather than corrupting. idx
+// survives (pg_open doesn't touch it), so the slot still maps back into the pool.
+reset_conn :: proc(conn: ^Pg_Conn, cfg: Postgres_Config) {
+	if !conn.open {
+		return
+	}
+	pg_sock_close(conn)
+	conn.open = false
+	pg_open(conn, cfg)
 }
 
 pg_open :: proc(conn: ^Pg_Conn, cfg: Postgres_Config) -> bool {

@@ -49,6 +49,12 @@ run_guarded :: proc(b: ^Bifrost) {
 			write_response(b, 500, "text/plain; charset=utf-8", "500 internal server error")
 		}
 	}
+
+	// Hand back any pool connection still checked out to this worker. A no-op on
+	// the normal path (releases already ran); the safety net after a longjmp,
+	// which skips the deferred/explicit releases and would otherwise bleed the
+	// pool until it deadlocks (GH-010).
+	reclaim_borrowed_conns(b._app)
 }
 
 // rune: inscribe a middleware onto the app. Runes run in registration order,

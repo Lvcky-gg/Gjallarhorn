@@ -14,8 +14,6 @@ package gjallarhorn
 //   server.odin      listen / accept / request parsing
 //   response.odin    HTTP response writing
 
-import "core:fmt"
-
 DB_Type :: enum {
 	Postgres,
 	MySQL,
@@ -51,7 +49,8 @@ DEFAULT_POOL_SIZE :: 4
 
 // DEFAULT_SECRET signs session cookies when Config.secret is left empty. It is a
 // fixed, public string — fine for local dev, useless for security. Set a real
-// Config.secret in production; new() warns when this fallback is in play.
+// Config.secret in production: run() warns on it in debug builds and refuses to
+// start on it in release builds (see server.odin).
 DEFAULT_SECRET :: "gjallarhorn-insecure-default-key"
 
 Config :: struct {
@@ -96,9 +95,8 @@ new :: proc(cfg: Config) -> App {
 	if pool_size <= 0 {
 		pool_size = DEFAULT_POOL_SIZE
 	}
-	if cfg.secret == "" {
-		fmt.eprintln("gjallarhorn: no Config.secret set; signing sessions with the insecure default key")
-	}
+	// The insecure-default-secret check lives at start time (run), not here, so
+	// tests can construct an App without a secret. See run() in server.odin.
 	return App {
 		host      = cfg.host,
 		port      = cfg.port,

@@ -20,6 +20,7 @@ Bifrost :: struct {
 	client:      net.TCP_Socket,
 	ssl:         rawptr, // TLS session when serving HTTPS; nil for plaintext (GH-054)
 	written:     bool,
+	status:      int,               // final response status, recorded by write_response (for logging)
 	keep_alive:  bool,              // reuse the socket after this response
 
 	// Chain state, driven by `next`. Underscored: not for handler use.

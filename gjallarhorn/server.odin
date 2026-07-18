@@ -13,6 +13,19 @@ import "core:time"
 
 run :: proc(app: ^App) {
 
+	// Fail closed on the insecure default session secret. Session cookies are
+	// HMAC-signed with app.secret; an empty or default key is public knowledge,
+	// so any client could forge a session. In a debug build we warn and let the
+	// operator keep moving; in a release build we refuse to start (GH-051).
+	if app.secret == "" || app.secret == DEFAULT_SECRET {
+		when ODIN_DEBUG {
+			logf(.Warn, "session secret is the insecure default; set Config.secret before shipping (release builds refuse to start)")
+		} else {
+			logf(.Error, "refusing to start: Config.secret is unset or the insecure default; sessions would be forgeable. Set Config.secret to a strong random value.")
+			return
+		}
+	}
+
 	if app.postgres.dbname != "" && !app.pool.open {
 		if connect(app) {
 			fmt.printfln("mimir: connected to postgres %s/%s (pool of %d)", app.postgres.host, app.postgres.dbname, app.pool_size)

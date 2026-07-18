@@ -10,6 +10,7 @@ write_response :: proc(b: ^Bifrost, status: int, content_type: string, body: str
 	if b.written {
 		return
 	}
+	b.status = status
 	sb := strings.builder_make(context.temp_allocator)
 	fmt.sbprintf(&sb, "HTTP/1.1 %d %s\r\n", status, status_text(status))
 	fmt.sbprintf(&sb, "Content-Type: %s\r\n", content_type)

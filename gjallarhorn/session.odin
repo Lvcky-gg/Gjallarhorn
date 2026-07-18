@@ -102,8 +102,9 @@ session_drop_cookie :: proc(b: ^Bifrost) {
 	b.cookies = kept
 }
 
-// session_key is App.secret when set, else the insecure default (new() warns).
-// Tolerates a nil _app so a Bifrost built in tests still signs.
+// session_key is App.secret when set, else the insecure default (run() refuses
+// to start on the default in release builds). Tolerates a nil _app so a Bifrost
+// built in tests still signs.
 session_key :: proc(b: ^Bifrost) -> string {
 	if b._app != nil && b._app.secret != "" {
 		return b._app.secret

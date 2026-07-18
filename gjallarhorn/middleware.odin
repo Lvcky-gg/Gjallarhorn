@@ -7,6 +7,7 @@ package gjallarhorn
 import "base:runtime"
 import "core:c/libc"
 import "core:fmt"
+import "core:time"
 
 Next :: proc(b: ^Bifrost)
 Middleware :: proc(b: ^Bifrost, next: Next)
@@ -83,9 +84,20 @@ cors :: proc(b: ^Bifrost, next: Next) {
 	next(b)
 }
 
-// logger: one line per request. Runs code on the way in; the post-`next`
-// position is where response logging/timing would go.
+// logger: one leveled, structured line per request. The line is emitted after
+// `next` returns — the post-next position — so it reports the final status and
+// how long the whole chain took. The level is derived from the status (5xx
+// Error, 4xx Warn, else Info), so error responses stand out and route to stderr.
 logger :: proc(b: ^Bifrost, next: Next) {
-	fmt.printfln("→ %v %s", b.method, b.path)
+	start := time.tick_now()
 	next(b)
+	dur_ms := time.duration_milliseconds(time.tick_diff(start, time.tick_now()))
+	logf(
+		log_level_for_status(b.status),
+		"method=%v path=%q status=%d dur_ms=%.3f",
+		b.method,
+		b.path,
+		b.status,
+		dur_ms,
+	)
 }

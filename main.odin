@@ -16,6 +16,7 @@ main :: proc() {
 			host = "127.0.0.1", port = 5432,
 			user = "app", password = "secret", dbname = "gjallarhorn",
 		},
+		secret = "asdwASDWdadndaoiwdjkasdwe",
 	})
 
 	// Middleware is registered with rune, in onion order.

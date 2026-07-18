@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rg -rl -i \"finding|vulnerab|exploit|CWE|injection|CVE-\" .)",
+      "Bash(cd /usr/lib/odin; echo \"===tick / now / diff===\"; rg -n \"^tick_now|^now ::|^diff ::|^duration_milliseconds|^tick_diff|^duration_seconds\" core/time/time.odin core/time/perf.odin; echo \"===rfc3339 to_string===\"; rg -n \"^to_string_rfc3339|^time_to_rfc3339|to_rfc3339\" core/time/rfc3339.odin | head)",
+      "Read(//usr/lib/odin/**)",
+      "Bash(rg -n \"^run ::|run ::|^serve ::\" gjallarhorn/*.odin)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(echo \"release_exit=$?\")",
+      "Bash(echo \"test_exit=$?\")"
+    ]
+  }
+}

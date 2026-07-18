@@ -23,7 +23,7 @@ Middleware :: proc(b: ^Bifrost, next: Next)
 // worker threads: it logs the fault, then unwinds to the armed checkpoint.
 // Outside a guarded section it falls back to the default (which aborts).
 recovery_failure_proc :: proc(prefix, message: string, loc: runtime.Source_Code_Location) -> ! {
-	fmt.eprintfln("gjallarhorn: recovered handler panic at %v: %s%s", loc, prefix, message)
+	logf(.Error, "recovered handler panic at %v: %s%s", loc, prefix, message)
 	if panic_armed {
 		panic_armed = false
 		libc.longjmp(&panic_jmp, 1)
@@ -98,12 +98,17 @@ logger :: proc(b: ^Bifrost, next: Next) {
 	start := time.tick_now()
 	next(b)
 	dur_ms := time.duration_milliseconds(time.tick_diff(start, time.tick_now()))
-	logf(
-		log_level_for_status(b.status),
-		"method=%v path=%q status=%d dur_ms=%.3f",
-		b.method,
-		b.path,
-		b.status,
-		dur_ms,
-	)
+
+	level := log_level_for_status(b.status)
+	if stream_color(level) {
+		// Pretty (TTY): bold-cyan method, status colored by class, dim duration —
+		// aligned so a column of requests scans cleanly.
+		method := paint(true, "\e[1;36m", fmt.tprintf("%-6v", b.method))
+		status := paint(true, status_sgr(b.status), fmt.tprintf("%d", b.status))
+		dur := paint(true, ANSI_DIM, fmt.tprintf("%.2fms", dur_ms))
+		logf(level, "%s %s  %s  %s", method, status, b.path, dur)
+	} else {
+		// Plain (piped): structured key=value the stable format keeps greppable.
+		logf(level, "method=%v path=%q status=%d dur_ms=%.3f", b.method, b.path, b.status, dur_ms)
+	}
 }

@@ -2,7 +2,13 @@
   "permissions": {
     "allow": [
       "Bash(rg -n \"is_digit|all_digits|ascii|max_body\" gjallarhorn/*.odin)",
-      "Bash(echo \"BUILD_RC=$?\")"
+      "Bash(echo \"BUILD_RC=$?\")",
+      "Bash(rg -rin \"multipart|form-data|boundary\" gjallarhorn/)",
+      "Bash(rg -rin \"bcrypt|argon|scrypt|pbkdf|password\" gjallarhorn/)",
+      "Bash(rg -n \"fmt\\\\.\\(e?print|e?printf|e?println|e?printfln|tprintf|sbprint\\)\" gjallarhorn/*.odin)",
+      "Bash(rg -rn \"is_terminal|isatty\" /usr/lib/odin/core/os/)",
+      "Read(//usr/lib/odin/core/sys/**)",
+      "Bash(pgrep -af \"scratchpad/gj$\")"
     ],
     "additionalDirectories": [
       "/home/lvcky/Documents/obsidian/Brain/04_Coding/Solutions"

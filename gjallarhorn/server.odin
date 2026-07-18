@@ -26,11 +26,18 @@ run :: proc(app: ^App) {
 		}
 	}
 
+	pretty := stream_color(.Info)
 	if app.postgres.dbname != "" && !app.pool.open {
 		if connect(app) {
-			fmt.printfln("mimir: connected to postgres %s/%s (pool of %d)", app.postgres.host, app.postgres.dbname, app.pool_size)
+			fmt.printfln(
+				"%s  connected to postgres %s/%s (pool of %d)",
+				paint(pretty, "\e[1;34m", "mimir"),
+				app.postgres.host,
+				app.postgres.dbname,
+				app.pool_size,
+			)
 		} else {
-			fmt.eprintln("mimir: postgres unavailable — migrations will print only")
+			logf(.Warn, "mimir: postgres unavailable — migrations will print only")
 		}
 	}
 
@@ -47,11 +54,11 @@ run :: proc(app: ^App) {
 	scheme := "http"
 	if app.tls_cert != "" || app.tls_key != "" {
 		if app.tls_cert == "" || app.tls_key == "" {
-			fmt.eprintln("gjallarhorn: tls_cert and tls_key must both be set for HTTPS")
+			logf(.Error, "tls_cert and tls_key must both be set for HTTPS")
 			return
 		}
 		when !GJ_TLS {
-			fmt.eprintln("gjallarhorn: HTTPS requires a TLS build — rebuild with -define:GJ_TLS=true")
+			logf(.Error, "HTTPS requires a TLS build — rebuild with -define:GJ_TLS=true")
 			return
 		}
 		ctx, ok := tls_server_ctx(app.tls_cert, app.tls_key)
@@ -64,7 +71,7 @@ run :: proc(app: ^App) {
 
 	sock, err := net.listen_tcp(endpoint)
 	if err != nil {
-		fmt.eprintfln("gjallarhorn: listen failed on %v: %v", endpoint, err)
+		logf(.Error, "listen failed on %v: %v", endpoint, err)
 		return
 	}
 	defer net.close(sock)
@@ -73,7 +80,13 @@ run :: proc(app: ^App) {
 		app.tls_ctx = nil
 	}
 
-	fmt.printfln("gjallarhorn: listening on %s://%v", scheme, net.endpoint_to_string(endpoint))
+	url := fmt.tprintf("%s://%v", scheme, net.endpoint_to_string(endpoint))
+	fmt.printfln(
+		"%s %s  listening on %s",
+		paint(pretty, "\e[1;35m", "▲"),
+		paint(pretty, "\e[1m", "gjallarhorn"),
+		paint(pretty, "\e[1;36m", url),
+	)
 
 	// One thread per connection. accept_tcp is the only thing the accept loop
 	// blocks on; request handling (which may stall on a slow client) is pushed
@@ -82,7 +95,7 @@ run :: proc(app: ^App) {
 	for {
 		client, _, accept_err := net.accept_tcp(sock)
 		if accept_err != nil {
-			fmt.eprintfln("gjallarhorn: accept error: %v", accept_err)
+			logf(.Error, "accept error: %v", accept_err)
 			continue
 		}
 		thread.run_with_poly_data3(app, client, app.tls_ctx, handle_worker)
@@ -100,7 +113,7 @@ bind_address :: proc(host: string) -> net.Address {
 	if addr, ok := net.parse_ip4_address(host); ok {
 		return addr
 	}
-	fmt.eprintfln("gjallarhorn: invalid host %q, falling back to loopback", host)
+	logf(.Warn, "invalid host %q, falling back to loopback", host)
 	return net.IP4_Loopback
 }
 

@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>CSRF demo — Gjallarhorn</title></head>
+<body>
+  <h1>CSRF-protected form</h1>
+  <p>This form carries the session's CSRF token in a hidden field. Posting it to
+     <code>/submit</code> passes the <code>csrf</code> rune; tampering with or
+     dropping the token gets a 403.</p>
+
+  <form method="POST" action="/submit">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Name: <input type="text" name="name" value="Heimdallr"></label>
+    <button type="submit">Send</button>
+  </form>
+</body>
+</html>

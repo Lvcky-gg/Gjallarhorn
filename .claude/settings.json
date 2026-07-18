@@ -8,6 +8,9 @@
       "Bash(echo \"exit=$?\")",
       "Bash(echo \"release_exit=$?\")",
       "Bash(echo \"test_exit=$?\")"
+    ],
+    "additionalDirectories": [
+      "/home/lvcky/Documents/obsidian/Brain/04_Coding/Solutions"
     ]
   }
 }

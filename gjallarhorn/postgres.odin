@@ -261,12 +261,12 @@ pg_open :: proc(conn: ^Pg_Conn, cfg: Postgres_Config) -> bool {
 
 	ep, rerr := net.resolve_ip4(fmt.tprintf("%s:%d", host, port))
 	if rerr != nil {
-		fmt.eprintfln("mimir/pg: cannot resolve %s:%d: %v", host, port, rerr)
+		logft(.Error, "mimir/pg", "cannot resolve %s:%d: %v", host, port, rerr)
 		return false
 	}
 	sock, derr := net.dial_tcp(ep)
 	if derr != nil {
-		fmt.eprintfln("mimir/pg: dial %s:%d failed: %v", host, port, derr)
+		logft(.Error, "mimir/pg", "dial %s:%d failed: %v", host, port, derr)
 		return false
 	}
 	conn.sock = sock
@@ -296,8 +296,10 @@ pg_negotiate_tls :: proc(conn: ^Pg_Conn, cfg: Postgres_Config) -> bool {
 		return true
 	}
 	when !GJ_TLS {
-		fmt.eprintfln(
-			"mimir/pg: sslmode=%v requires a TLS build — rebuild with -define:GJ_TLS=true",
+		logft(
+			.Error,
+			"mimir/pg",
+			"sslmode=%v requires a TLS build — rebuild with -define:GJ_TLS=true",
 			cfg.sslmode,
 		)
 		return false
@@ -322,10 +324,10 @@ pg_negotiate_tls :: proc(conn: ^Pg_Conn, cfg: Postgres_Config) -> bool {
 		if cfg.sslmode == .Prefer {
 			return true // server has no TLS; proceed in cleartext
 		}
-		fmt.eprintln("mimir/pg: server declined TLS (SSLRequest 'N') but sslmode requires it")
+		logft(.Error, "mimir/pg", "server declined TLS (SSLRequest 'N') but sslmode requires it")
 		return false
 	case:
-		fmt.eprintfln("mimir/pg: unexpected SSLRequest reply 0x%02x", reply[0])
+		logft(.Error, "mimir/pg", "unexpected SSLRequest reply 0x%02x", reply[0])
 		return false
 	}
 }
@@ -388,11 +390,11 @@ pg_auth :: proc(conn: ^Pg_Conn, cfg: Postgres_Config) -> bool {
 					return false
 				}
 			case:
-				fmt.eprintfln("mimir/pg: unsupported auth request %d", code)
+				logft(.Error, "mimir/pg", "unsupported auth request %d", code)
 				return false
 			}
 		case 'E': // ErrorResponse
-			fmt.eprintfln("mimir/pg: %s", pg_error_text(parse_pg_error(msg.payload)))
+			logft(.Error, "mimir/pg", "%s", pg_error_text(parse_pg_error(msg.payload)))
 			return false
 		case 'Z': // ReadyForQuery
 			return true
@@ -418,7 +420,7 @@ pg_password :: proc(conn: ^Pg_Conn, password: string) -> bool {
 // AuthenticationSASLContinue/Final ('R', codes 11/12).
 pg_scram :: proc(conn: ^Pg_Conn, cfg: Postgres_Config, mechanisms: []u8) -> bool {
 	if !scram_offers(mechanisms, "SCRAM-SHA-256") {
-		fmt.eprintln("mimir/pg: server did not offer SCRAM-SHA-256")
+		logft(.Error, "mimir/pg", "server did not offer SCRAM-SHA-256")
 		return false
 	}
 
@@ -442,13 +444,13 @@ pg_scram :: proc(conn: ^Pg_Conn, cfg: Postgres_Config, mechanisms: []u8) -> bool
 	// server-first (AuthenticationSASLContinue, code 11).
 	cont, ok := pg_read_msg(conn, context.temp_allocator)
 	if !ok || cont.type != 'R' || be_u32(cont.payload[0:4]) != 11 {
-		fmt.eprintln("mimir/pg: expected SASLContinue")
+		logft(.Error, "mimir/pg", "expected SASLContinue")
 		return false
 	}
 	server_first := string(cont.payload[4:])
 	server_nonce, salt_b64, iter_s, parsed := scram_server_first(server_first)
 	if !parsed || !strings.has_prefix(server_nonce, client_nonce) {
-		fmt.eprintln("mimir/pg: malformed server-first or nonce mismatch")
+		logft(.Error, "mimir/pg", "malformed server-first or nonce mismatch")
 		return false
 	}
 	salt, _ := base64.decode(salt_b64, allocator = context.temp_allocator)
@@ -484,12 +486,12 @@ pg_scram :: proc(conn: ^Pg_Conn, cfg: Postgres_Config, mechanisms: []u8) -> bool
 	// server-final (AuthenticationSASLFinal, code 12): verify ServerSignature.
 	fin, fok := pg_read_msg(conn, context.temp_allocator)
 	if !fok || fin.type != 'R' || be_u32(fin.payload[0:4]) != 12 {
-		fmt.eprintln("mimir/pg: expected SASLFinal (bad password?)")
+		logft(.Error, "mimir/pg", "expected SASLFinal (bad password?)")
 		return false
 	}
 	server_final := string(fin.payload[4:])
 	if !strings.has_prefix(server_final, "v=") {
-		fmt.eprintln("mimir/pg: malformed server-final")
+		logft(.Error, "mimir/pg", "malformed server-final")
 		return false
 	}
 
@@ -499,7 +501,7 @@ pg_scram :: proc(conn: ^Pg_Conn, cfg: Postgres_Config, mechanisms: []u8) -> bool
 	hmac.sum(.SHA256, expected[:], transmute([]u8)auth_message, server_key[:])
 	expected_b64, _ := base64.encode(expected[:], allocator = context.temp_allocator)
 	if server_final[2:] != expected_b64 {
-		fmt.eprintln("mimir/pg: SCRAM server signature verification failed")
+		logft(.Error, "mimir/pg", "SCRAM server signature verification failed")
 		return false
 	}
 	return true
@@ -559,7 +561,7 @@ pg_simple :: proc(conn: ^Pg_Conn, sql: string) -> bool {
 		}
 		switch msg.type {
 		case 'E':
-			fmt.eprintfln("mimir/pg: %s", pg_error_text(parse_pg_error(msg.payload)))
+			logft(.Error, "mimir/pg", "%s", pg_error_text(parse_pg_error(msg.payload)))
 			had_error = true
 		case 'Z': // ReadyForQuery terminates the exchange
 			return !had_error
@@ -577,7 +579,7 @@ pg_query :: proc(conn: ^Pg_Conn, sql: string, args: []any, allocator := context.
 	for a, i in args {
 		text, null, enc_ok := encode_bind(a, context.temp_allocator)
 		if !enc_ok {
-			fmt.eprintfln("mimir/pg: cannot encode bind arg $%d of type %v", i + 1, a.id)
+			logft(.Error, "mimir/pg", "cannot encode bind arg $%d of type %v", i + 1, a.id)
 			return {}, false
 		}
 		is_null[i] = null
@@ -638,7 +640,7 @@ pg_query :: proc(conn: ^Pg_Conn, sql: string, args: []any, allocator := context.
 			out.tag = strings.clone(cstring_of(msg.payload), allocator)
 		case 'E': // ErrorResponse — keep it structured for the caller
 			out.err = parse_pg_error(msg.payload, allocator)
-			fmt.eprintfln("mimir/pg: %s", pg_error_text(out.err))
+			logft(.Error, "mimir/pg", "%s", pg_error_text(out.err))
 			had_error = true
 		case 'Z': // ReadyForQuery
 			out.rows = rows[:]

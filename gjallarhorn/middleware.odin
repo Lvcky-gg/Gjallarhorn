@@ -23,7 +23,7 @@ Middleware :: proc(b: ^Bifrost, next: Next)
 // worker threads: it logs the fault, then unwinds to the armed checkpoint.
 // Outside a guarded section it falls back to the default (which aborts).
 recovery_failure_proc :: proc(prefix, message: string, loc: runtime.Source_Code_Location) -> ! {
-	logf(.Error, "recovered handler panic at %v: %s%s", loc, prefix, message)
+	logft(.Error, "gjallarhorn", "recovered handler panic at %v: %s%s", loc, prefix, message)
 	if panic_armed {
 		panic_armed = false
 		libc.longjmp(&panic_jmp, 1)

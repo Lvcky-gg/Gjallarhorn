@@ -16,7 +16,6 @@ package gjallarhorn
 // all reads/writes through SSL_read/SSL_write.
 
 import "core:c"
-import "core:fmt"
 import "core:net"
 import "core:strings"
 
@@ -70,7 +69,7 @@ when GJ_TLS {
 	tls_client_connect :: proc(sock: net.TCP_Socket, host: string, verify: bool) -> (rawptr, bool) {
 		ctx := SSL_CTX_new(TLS_client_method())
 		if ctx == nil {
-			fmt.eprintln("tls: SSL_CTX_new failed")
+			logft(.Error, "tls", "SSL_CTX_new failed")
 			return nil, false
 		}
 		if verify {
@@ -80,11 +79,11 @@ when GJ_TLS {
 		ssl := SSL_new(ctx)
 		SSL_CTX_free(ctx) // SSL_new took a ref; ctx lives until SSL_free
 		if ssl == nil {
-			fmt.eprintln("tls: SSL_new failed")
+			logft(.Error, "tls", "SSL_new failed")
 			return nil, false
 		}
 		if SSL_set_fd(ssl, c.int(sock)) != 1 {
-			fmt.eprintln("tls: SSL_set_fd failed")
+			logft(.Error, "tls", "SSL_set_fd failed")
 			SSL_free(ssl)
 			return nil, false
 		}
@@ -98,12 +97,12 @@ when GJ_TLS {
 		}
 
 		if SSL_connect(ssl) != 1 {
-			fmt.eprintfln("tls: handshake with %s failed", host)
+			logft(.Error, "tls", "handshake with %s failed", host)
 			SSL_free(ssl)
 			return nil, false
 		}
 		if verify && SSL_get_verify_result(ssl) != X509_V_OK {
-			fmt.eprintfln("tls: certificate verification for %s failed", host)
+			logft(.Error, "tls", "certificate verification for %s failed", host)
 			SSL_shutdown(ssl)
 			SSL_free(ssl)
 			return nil, false
@@ -118,23 +117,23 @@ when GJ_TLS {
 	tls_server_ctx :: proc(cert_file, key_file: string) -> (rawptr, bool) {
 		ctx := SSL_CTX_new(TLS_server_method())
 		if ctx == nil {
-			fmt.eprintln("tls: SSL_CTX_new (server) failed")
+			logft(.Error, "tls", "SSL_CTX_new (server) failed")
 			return nil, false
 		}
 		cert_c := strings.clone_to_cstring(cert_file, context.temp_allocator)
 		key_c := strings.clone_to_cstring(key_file, context.temp_allocator)
 		if SSL_CTX_use_certificate_chain_file(ctx, cert_c) != 1 {
-			fmt.eprintfln("tls: cannot load certificate %q", cert_file)
+			logft(.Error, "tls", "cannot load certificate %q", cert_file)
 			SSL_CTX_free(ctx)
 			return nil, false
 		}
 		if SSL_CTX_use_PrivateKey_file(ctx, key_c, SSL_FILETYPE_PEM) != 1 {
-			fmt.eprintfln("tls: cannot load private key %q", key_file)
+			logft(.Error, "tls", "cannot load private key %q", key_file)
 			SSL_CTX_free(ctx)
 			return nil, false
 		}
 		if SSL_CTX_check_private_key(ctx) != 1 {
-			fmt.eprintln("tls: private key does not match the certificate")
+			logft(.Error, "tls", "private key does not match the certificate")
 			SSL_CTX_free(ctx)
 			return nil, false
 		}

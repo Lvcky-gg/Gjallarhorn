@@ -109,6 +109,14 @@ status_sgr :: proc(status: int) -> string {
 // and above go to stderr; everything else to stdout. The message is formatted
 // in temp memory, so callers on the request path pay no lasting allocation.
 logf :: proc(level: Log_Level, format: string, args: ..any) {
+	logft(level, "", format, ..args)
+}
+
+// logft is logf with a subsystem tag (e.g. "mimir/pg", "tls") rendered as a dim
+// [tag] column between the level badge and the message — so a scan of the log
+// tells apart the wire client, the TLS layer, and request handling at a glance.
+// An empty tag falls back to the plain, columnless form (what request logs use).
+logft :: proc(level: Log_Level, sub: string, format: string, args: ..any) {
 	if level < log_min_level {
 		return
 	}
@@ -116,14 +124,24 @@ logf :: proc(level: Log_Level, format: string, args: ..any) {
 
 	line: string
 	if stream_color(level) {
-		// Pretty (TTY): dim HH:MM:SS, a bold colored level badge, then the message.
-		clock := _clock_now()
+		// Pretty (TTY): dim HH:MM:SS, a bold colored level badge, an optional dim
+		// [tag], then the message.
+		clock := paint(true, ANSI_DIM, _clock_now())
 		badge := paint(true, level_sgr[level], fmt.tprintf("%-5s", log_level_label[level]))
-		line = fmt.tprintf("%s %s %s", paint(true, ANSI_DIM, clock), badge, msg)
+		if sub != "" {
+			tag := paint(true, ANSI_DIM, fmt.tprintf("%-10s", fmt.tprintf("[%s]", sub)))
+			line = fmt.tprintf("%s %s %s %s", clock, badge, tag, msg)
+		} else {
+			line = fmt.tprintf("%s %s %s", clock, badge, msg)
+		}
 	} else {
 		// Plain (piped): the stable, greppable rfc3339 form.
 		ts, _ := time.time_to_rfc3339(time.now(), allocator = context.temp_allocator)
-		line = fmt.tprintf("%s %-5s %s", ts, log_level_label[level], msg)
+		if sub != "" {
+			line = fmt.tprintf("%s %-5s [%s] %s", ts, log_level_label[level], sub, msg)
+		} else {
+			line = fmt.tprintf("%s %-5s %s", ts, log_level_label[level], msg)
+		}
 	}
 
 	if level >= .Warn {

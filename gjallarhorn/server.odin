@@ -37,7 +37,7 @@ run :: proc(app: ^App) {
 				app.pool_size,
 			)
 		} else {
-			logf(.Warn, "mimir: postgres unavailable — migrations will print only")
+			logft(.Warn, "mimir", "postgres unavailable — migrations will print only")
 		}
 	}
 
@@ -54,11 +54,11 @@ run :: proc(app: ^App) {
 	scheme := "http"
 	if app.tls_cert != "" || app.tls_key != "" {
 		if app.tls_cert == "" || app.tls_key == "" {
-			logf(.Error, "tls_cert and tls_key must both be set for HTTPS")
+			logft(.Error, "gjallarhorn", "tls_cert and tls_key must both be set for HTTPS")
 			return
 		}
 		when !GJ_TLS {
-			logf(.Error, "HTTPS requires a TLS build — rebuild with -define:GJ_TLS=true")
+			logft(.Error, "gjallarhorn", "HTTPS requires a TLS build — rebuild with -define:GJ_TLS=true")
 			return
 		}
 		ctx, ok := tls_server_ctx(app.tls_cert, app.tls_key)
@@ -71,7 +71,7 @@ run :: proc(app: ^App) {
 
 	sock, err := net.listen_tcp(endpoint)
 	if err != nil {
-		logf(.Error, "listen failed on %v: %v", endpoint, err)
+		logft(.Error, "gjallarhorn", "listen failed on %v: %v", endpoint, err)
 		return
 	}
 	defer net.close(sock)
@@ -95,7 +95,7 @@ run :: proc(app: ^App) {
 	for {
 		client, _, accept_err := net.accept_tcp(sock)
 		if accept_err != nil {
-			logf(.Error, "accept error: %v", accept_err)
+			logft(.Error, "gjallarhorn", "accept error: %v", accept_err)
 			continue
 		}
 		thread.run_with_poly_data3(app, client, app.tls_ctx, handle_worker)
@@ -113,7 +113,7 @@ bind_address :: proc(host: string) -> net.Address {
 	if addr, ok := net.parse_ip4_address(host); ok {
 		return addr
 	}
-	logf(.Warn, "invalid host %q, falling back to loopback", host)
+	logft(.Warn, "gjallarhorn", "invalid host %q, falling back to loopback", host)
 	return net.IP4_Loopback
 }
 

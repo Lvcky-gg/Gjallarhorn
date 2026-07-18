@@ -210,13 +210,19 @@ migrate :: proc(app: ^App) {
 		return
 	}
 	w := well(app)
-	fmt.printfln("mimir: migrating %d model(s) [%v]", len(app.models), w.dialect)
+	pretty := stream_color(.Info)
+	fmt.printfln(
+		"%s  migrating %d model(s) [%v]",
+		paint(pretty, "\e[1;34m", "mimir"),
+		len(app.models),
+		w.dialect,
+	)
 
 	// Offline (no connection): just print the CREATE DDL as before — there's no
-	// live schema to diff against.
+	// live schema to diff against. Dimmed, since it's a preview rather than a run.
 	if !app.pool.open {
 		for m in app.models {
-			fmt.println(carve(w, m))
+			fmt.println(paint(pretty, ANSI_DIM, carve(w, m)))
 		}
 		return
 	}
@@ -224,7 +230,7 @@ migrate :: proc(app: ^App) {
 	// Migration runs once at startup; pin a single pooled connection for it.
 	conn, ok := pool_acquire(&app.pool)
 	if !ok {
-		fmt.eprintln("mimir: could not acquire a connection for migration")
+		logft(.Error, "mimir", "could not acquire a connection for migration")
 		return
 	}
 	defer pool_release(&app.pool, conn)
@@ -236,14 +242,18 @@ migrate :: proc(app: ^App) {
 
 		// 1. CREATE TABLE IF NOT EXISTS — makes a brand-new table whole.
 		if !pg_simple(conn, carve(w, m)) {
-			fmt.eprintfln("  ✗ %s (create failed, see error above)", table)
+			fmt.eprintfln(
+				"  %s %s (create failed, see error above)",
+				paint(stream_color(.Error), "\e[1;31m", "✗"),
+				table,
+			)
 			continue
 		}
 
 		// 2. Diff the model against the live columns and ALTER in the missing
 		//    ones, so adding a field to an existing model takes effect.
 		added := add_missing_columns(conn, w, m, table)
-		fmt.printfln("  ✓ %s (+%d column(s))", table, added)
+		fmt.printfln("  %s %s (+%d column(s))", paint(pretty, "\e[1;32m", "✓"), table, added)
 	}
 }
 
@@ -267,7 +277,12 @@ add_missing_columns :: proc(conn: ^Pg_Conn, w: Well, T: typeid, table: string) -
 			log_migration(conn, fmt.tprintf("add_column:%s.%s", table, col.name))
 			added += 1
 		} else {
-			fmt.eprintfln("  ✗ %s.%s (alter failed, see error above)", table, col.name)
+			fmt.eprintfln(
+				"  %s %s.%s (alter failed, see error above)",
+				paint(stream_color(.Error), "\e[1;31m", "✗"),
+				table,
+				col.name,
+			)
 		}
 	}
 	return added

@@ -40,6 +40,36 @@ encode_arg_table :: proc(t: ^testing.T) {
 	testing.expect(t, !ok, "unknown types are rejected, not %v-stringified")
 }
 
+@(test)
+encode_bind_maybe :: proc(t: ^testing.T) {
+	// Write-side Maybe(T) support (GH-024), the mirror of scan's read side:
+	// Some(v) encodes as v, None becomes SQL NULL, and Some("") stays an empty
+	// value (not NULL).
+	expect_bind :: proc(t: ^testing.T, a: any, want: string, want_null: bool) {
+		got, is_null, ok := gh.encode_bind(a, context.temp_allocator)
+		testing.expect(t, ok, "type should be supported")
+		testing.expect_value(t, is_null, want_null)
+		testing.expect_value(t, got, want)
+	}
+
+	expect_bind(t, 42, "42", false) // plain args unchanged
+
+	some_s: Maybe(string) = "hi"
+	none_s: Maybe(string)
+	expect_bind(t, some_s, "hi", false)
+	expect_bind(t, none_s, "", true)
+
+	some_i: Maybe(int) = 5
+	none_i: Maybe(int)
+	expect_bind(t, some_i, "5", false)
+	expect_bind(t, none_i, "", true)
+
+	empty_s: Maybe(string) = "" // Some("") is an empty value, NOT NULL
+	expect_bind(t, empty_s, "", false)
+
+	expect_bind(t, nil, "", true) // a literal nil any is NULL
+}
+
 Stored :: struct {
 	id:   int    `db:"id,pk,auto"`,
 	blob: string `db:"blob"`, // bytea read back as text (hex) by scan

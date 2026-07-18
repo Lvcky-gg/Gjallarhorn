@@ -515,15 +515,12 @@ pg_query :: proc(conn: ^Pg_Conn, sql: string, args: []any, allocator := context.
 	encoded := make([]string, len(args), context.temp_allocator)
 	is_null := make([]bool, len(args), context.temp_allocator)
 	for a, i in args {
-		if a == nil {
-			is_null[i] = true
-			continue
-		}
-		text, enc_ok := encode_arg(a, context.temp_allocator)
+		text, null, enc_ok := encode_bind(a, context.temp_allocator)
 		if !enc_ok {
 			fmt.eprintfln("mimir/pg: cannot encode bind arg $%d of type %v", i + 1, a.id)
 			return {}, false
 		}
+		is_null[i] = null
 		encoded[i] = text
 	}
 
@@ -668,6 +665,44 @@ encode_arg :: proc(a: any, allocator := context.temp_allocator) -> (text: string
 		), true
 	}
 	return "", false
+}
+
+// encode_bind prepares one bind argument, unwrapping a Maybe(T): a None becomes
+// SQL NULL (is_null), a Some(v) is encoded like a plain v, and a literal Odin nil
+// is NULL too. This is the write-side mirror of scan's Maybe support (GH-024), so
+// a nullable model field round-trips NULL both directions. ok=false means the
+// unwrapped type has no text encoding — the caller then refuses the statement.
+encode_bind :: proc(a: any, allocator := context.temp_allocator) -> (text: string, is_null: bool, ok: bool) {
+	// A None Maybe is SQL NULL; a Some is encoded from its inner value, which
+	// stays in scope for encode_arg (returning an `any` over a local would dangle).
+	switch v in a {
+	case Maybe(int):
+		m, has := v.?; if !has {return "", true, true}
+		t, e := encode_arg(m, allocator); return t, false, e
+	case Maybe(i64):
+		m, has := v.?; if !has {return "", true, true}
+		t, e := encode_arg(m, allocator); return t, false, e
+	case Maybe(i32):
+		m, has := v.?; if !has {return "", true, true}
+		t, e := encode_arg(m, allocator); return t, false, e
+	case Maybe(f64):
+		m, has := v.?; if !has {return "", true, true}
+		t, e := encode_arg(m, allocator); return t, false, e
+	case Maybe(f32):
+		m, has := v.?; if !has {return "", true, true}
+		t, e := encode_arg(m, allocator); return t, false, e
+	case Maybe(bool):
+		m, has := v.?; if !has {return "", true, true}
+		t, e := encode_arg(m, allocator); return t, false, e
+	case Maybe(string):
+		m, has := v.?; if !has {return "", true, true}
+		t, e := encode_arg(m, allocator); return t, false, e
+	}
+	if a == nil {
+		return "", true, true
+	}
+	t, e := encode_arg(a, allocator)
+	return t, false, e
 }
 
 // bytea_text renders bytes as Postgres's hex bytea input: \x followed by hex.

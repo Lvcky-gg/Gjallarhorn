@@ -100,6 +100,15 @@ parse_headers :: proc(block: string, allocator := context.allocator) -> (headers
 		if name == "" {
 			return headers, false
 		}
+		// Reject a repeated Content-Length or Transfer-Encoding: two framing
+		// headers on one request are the classic smuggling desync (RFC 7230
+		// §3.3.3) — a front-end and back-end can pick different ones. Other
+		// duplicates keep the existing last-wins behaviour.
+		if name == "content-length" || name == "transfer-encoding" {
+			if _, dup := headers[name]; dup {
+				return headers, false
+			}
+		}
 		headers[name] = strings.trim_space(line[colon + 1:])
 	}
 	return headers, true

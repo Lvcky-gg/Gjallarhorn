@@ -39,3 +39,37 @@ headers_malformed :: proc(t: ^testing.T) {
 	_, ok := gh.parse_headers("Good: yes\r\nnocolonhere", context.temp_allocator)
 	testing.expect(t, !ok, "a line with no colon should be rejected")
 }
+
+@(test)
+duplicate_content_length_rejected :: proc(t: ^testing.T) {
+	// Two Content-Length headers are a request-smuggling desync — reject (400).
+	_, ok := gh.parse_headers(
+		"Host: x\r\nContent-Length: 5\r\nContent-Length: 6",
+		context.temp_allocator,
+	)
+	testing.expect(t, !ok, "duplicate Content-Length must be rejected")
+
+	// Case-insensitive: the second spelling still collides.
+	_, ok2 := gh.parse_headers(
+		"content-length: 5\r\nCONTENT-LENGTH: 5",
+		context.temp_allocator,
+	)
+	testing.expect(t, !ok2, "duplicate Content-Length is rejected regardless of case or value")
+}
+
+@(test)
+duplicate_transfer_encoding_rejected :: proc(t: ^testing.T) {
+	_, ok := gh.parse_headers(
+		"Host: x\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: gzip",
+		context.temp_allocator,
+	)
+	testing.expect(t, !ok, "duplicate Transfer-Encoding must be rejected")
+}
+
+@(test)
+duplicate_non_framing_header_allowed :: proc(t: ^testing.T) {
+	// Only the framing headers are strict; other duplicates keep last-wins.
+	h, ok := gh.parse_headers("Accept: a\r\nAccept: b", context.temp_allocator)
+	testing.expect(t, ok, "a non-framing duplicate should still parse")
+	testing.expect_value(t, h["accept"], "b")
+}

@@ -11,7 +11,10 @@
       "Bash(echo \"build_exit=$?\")",
       "Bash(cd /usr/lib/odin; rg -n \"^to_unix_seconds|^to_unix_nanoseconds|^unix ::|^to_unix\" core/time/time.odin | head)",
       "Bash(rg -n \"session_set|session_get|session\" sample/*.odin)",
-      "Bash(echo \"build=$?\")"
+      "Bash(echo \"build=$?\")",
+      "Bash(cd /home/lvcky/gjallarhorn; echo \"=== sample model ===\"; cat sample/model.odin; echo \"=== Maybe def in odin core ===\"; rg -n \"Maybe ::\" /usr/lib/odin/base/runtime/*.odin /usr/lib/odin/core/**/*.odin 2>/dev/null | head; echo \"=== reflect union helpers ===\"; rg -n \"Type_Info_Union|union_variant_type|get_union_variant|set_union\" /usr/lib/odin/core/reflect/reflect.odin | head)",
+      "Read(//usr/lib/odin/base/runtime/**)",
+      "Read(//usr/lib/odin/core/reflect/**)"
     ],
     "additionalDirectories": [
       "/home/lvcky/Documents/obsidian/Brain/04_Coding/Solutions",

@@ -502,10 +502,12 @@ sql :: proc(q: ^Query, allocator := context.temp_allocator) -> Statement {
 // them onto struct fields by mapped column name (the `db:` tag, else the field
 // name) and converts text to the field's type.
 //
-// Supported field types: int family, f32/f64, bool, string. NULL handling: the
-// driver surfaces a SQL NULL as an empty cell, which converts to the field's
-// zero value (0, false, ""). A column with no matching field is ignored, and a
-// field with no matching column is left zero.
+// Supported field types: int family, f32/f64, bool, string, and Maybe(T) of any
+// of those. NULL handling (GH-024): a SQL NULL sets a Maybe(T) field to None and
+// leaves a plain field at its zero value — the wire layer carries nullness in
+// Pg_Rows.nulls, so NULL is never silently conflated with an empty value. A
+// column with no matching field is ignored; a field with no matching column is
+// left zero.
 // ---------------------------------------------------------------------------
 
 // scan hydrates every result row into a freshly allocated []T.
@@ -527,12 +529,14 @@ scan :: proc(rows: Pg_Rows, $T: typeid, allocator := context.temp_allocator) -> 
 	for row, ri in rows.rows {
 		item: T
 		base := uintptr(rawptr(&item))
+		null_row := ri < len(rows.nulls) ? rows.nulls[ri] : nil
 		for cell, ci in row {
 			f, mapped := fields[ci].?
 			if !mapped {
 				continue
 			}
-			set_field(rawptr(base + f.offset), f.type.id, cell, allocator)
+			is_null := null_row != nil && ci < len(null_row) && null_row[ci]
+			set_field(rawptr(base + f.offset), f.type.id, cell, is_null, allocator)
 		}
 		out[ri] = item
 	}
@@ -548,10 +552,51 @@ scan_one :: proc(rows: Pg_Rows, $T: typeid, allocator := context.temp_allocator)
 	return scan(head, T, allocator)[0], true
 }
 
-// set_field writes one text cell into a struct field of the given type. A value
-// that fails to parse (including the empty cell from a NULL) leaves the zero.
+// set_field writes one text cell into a struct field of the given type, honoring
+// the SQL NULL flag (GH-024). A Maybe(T) field carries NULL as None and a value
+// as Some, so callers can tell a real NULL from a zero/empty value. A plain field
+// can't represent absence, so a NULL leaves the zero value — but it is never
+// mis-parsed from the empty-string placeholder. A value that fails to parse also
+// leaves the zero.
 @(private)
-set_field :: proc(ptr: rawptr, id: typeid, text: string, allocator: runtime.Allocator) {
+set_field :: proc(ptr: rawptr, id: typeid, text: string, is_null: bool, allocator: runtime.Allocator) {
+	// Nullable fields first: these must run even when is_null (to set None).
+	switch id {
+	case Maybe(int):
+		(^Maybe(int))(ptr)^ = nil
+		if !is_null {v, _ := strconv.parse_int(text); (^Maybe(int))(ptr)^ = v}
+		return
+	case Maybe(i64):
+		(^Maybe(i64))(ptr)^ = nil
+		if !is_null {v, _ := strconv.parse_i64(text); (^Maybe(i64))(ptr)^ = v}
+		return
+	case Maybe(i32):
+		(^Maybe(i32))(ptr)^ = nil
+		if !is_null {v, _ := strconv.parse_i64(text); (^Maybe(i32))(ptr)^ = i32(v)}
+		return
+	case Maybe(f64):
+		(^Maybe(f64))(ptr)^ = nil
+		if !is_null {v, _ := strconv.parse_f64(text); (^Maybe(f64))(ptr)^ = v}
+		return
+	case Maybe(f32):
+		(^Maybe(f32))(ptr)^ = nil
+		if !is_null {v, _ := strconv.parse_f32(text); (^Maybe(f32))(ptr)^ = v}
+		return
+	case Maybe(bool):
+		(^Maybe(bool))(ptr)^ = nil
+		if !is_null {(^Maybe(bool))(ptr)^ = parse_pg_bool(text)}
+		return
+	case Maybe(string):
+		(^Maybe(string))(ptr)^ = nil
+		if !is_null {(^Maybe(string))(ptr)^ = strings.clone(text, allocator)}
+		return
+	}
+
+	// Plain (non-nullable) field: a SQL NULL leaves the zero value and never
+	// mis-parses the empty-string placeholder into it.
+	if is_null {
+		return
+	}
 	switch id {
 	case int:
 		v, _ := strconv.parse_int(text);  (^int)(ptr)^ = v

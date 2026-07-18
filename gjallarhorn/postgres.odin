@@ -55,6 +55,7 @@ Pg_Pool :: struct {
 Pg_Rows :: struct {
 	columns: []string,
 	rows:    [][]string,
+	nulls:   [][]bool,  // per-cell SQL NULL flags, parallel to rows; nil = unknown (GH-024)
 	tag:     string,   // command tag, e.g. "INSERT 0 1"
 	err:     Pg_Error, // set (err.code != "") when the query failed; see GH-032
 }
@@ -565,6 +566,7 @@ pg_query :: proc(conn: ^Pg_Conn, sql: string, args: []any, allocator := context.
 	pg_send(conn, 'S', nil) or_return // Sync
 
 	rows := make([dynamic][]string, allocator)
+	nulls := make([dynamic][]bool, allocator)
 	had_error := false
 	for {
 		msg := pg_read_msg(conn, context.temp_allocator) or_return
@@ -572,7 +574,9 @@ pg_query :: proc(conn: ^Pg_Conn, sql: string, args: []any, allocator := context.
 		case 'T': // RowDescription
 			out.columns = parse_row_description(msg.payload, allocator)
 		case 'D': // DataRow
-			append(&rows, parse_data_row(msg.payload, allocator))
+			row, null_mask := parse_data_row(msg.payload, allocator)
+			append(&rows, row)
+			append(&nulls, null_mask)
 		case 'C': // CommandComplete — payload is the command tag (cstring)
 			out.tag = strings.clone(cstring_of(msg.payload), allocator)
 		case 'E': // ErrorResponse — keep it structured for the caller
@@ -581,6 +585,7 @@ pg_query :: proc(conn: ^Pg_Conn, sql: string, args: []any, allocator := context.
 			had_error = true
 		case 'Z': // ReadyForQuery
 			out.rows = rows[:]
+			out.nulls = nulls[:]
 			return out, !had_error
 		case: // ParseComplete '1', BindComplete '2', NoData 'n' — ignore
 		}
@@ -598,19 +603,25 @@ parse_row_description :: proc(payload: []u8, allocator: runtime.Allocator) -> []
 	return cols
 }
 
-parse_data_row :: proc(payload: []u8, allocator: runtime.Allocator) -> []string {
+// parse_data_row reads one DataRow into text cells plus a parallel NULL mask. A
+// field length of -1 (0xFFFFFFFF on the wire) is SQL NULL — distinct from length
+// 0 (an empty value). The two must not be conflated (GH-024): NULL is recorded in
+// `nulls`, and the cell is left "" only as a benign placeholder for consumers
+// that ignore the mask.
+parse_data_row :: proc(payload: []u8, allocator: runtime.Allocator) -> (row: []string, nulls: []bool) {
 	r := Reader{buf = payload}
 	n := int(r_u16(&r))
-	row := make([]string, n, allocator)
+	row = make([]string, n, allocator)
+	nulls = make([]bool, n, allocator)
 	for i in 0 ..< n {
 		length := i32(r_u32(&r))
 		if length < 0 {
-			row[i] = "" // NULL
+			nulls[i] = true // SQL NULL; row[i] stays "" as a placeholder
 			continue
 		}
 		row[i] = strings.clone(string(r_bytes(&r, int(length))), allocator)
 	}
-	return row
+	return
 }
 
 // ---------------------------------------------------------------------------

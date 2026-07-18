@@ -44,6 +44,61 @@ scan_converts_each_type :: proc(t: ^testing.T) {
 	testing.expect_value(t, out[1].maybe, "") // NULL -> zero value
 }
 
+// NullProbe uses Maybe(T) fields — the nullable shape that can hold SQL NULL
+// distinctly from a zero/empty value.
+NullProbe :: struct {
+	name:  Maybe(string) `db:"name"`,
+	count: Maybe(int)    `db:"count"`,
+}
+
+@(test)
+data_row_null_vs_empty :: proc(t: ^testing.T) {
+	// A DataRow with three fields: SQL NULL (length -1), empty (length 0), "hi".
+	// The wire layer must keep NULL and empty apart (GH-024).
+	payload := []u8 {
+		0x00, 0x03, // field count = 3
+		0xFF, 0xFF, 0xFF, 0xFF, // field 0: length -1 => SQL NULL
+		0x00, 0x00, 0x00, 0x00, // field 1: length 0  => empty value
+		0x00, 0x00, 0x00, 0x02, 0x68, 0x69, // field 2: "hi"
+	}
+	row, nulls := gh.parse_data_row(payload, context.temp_allocator)
+	testing.expect_value(t, len(row), 3)
+	testing.expect(t, nulls[0], "field 0 is SQL NULL")
+	testing.expect(t, !nulls[1], "field 1 is empty, not NULL")
+	testing.expect(t, !nulls[2], "field 2 has a value")
+	testing.expect_value(t, row[0], "") // NULL placeholder
+	testing.expect_value(t, row[1], "") // real empty
+	testing.expect_value(t, row[2], "hi")
+}
+
+@(test)
+scan_distinguishes_null_from_empty :: proc(t: ^testing.T) {
+	// The payoff: a Maybe(T) field reads SQL NULL as None, and a real empty/zero
+	// value as Some — so the two are no longer conflated on hydration.
+	rows := gh.Pg_Rows {
+		columns = []string{"name", "count"},
+		rows = [][]string{
+			{"", ""},  // row 0: both SQL NULL
+			{"", "0"}, // row 1: name = "" (real empty), count = 0
+		},
+		nulls = [][]bool{{true, true}, {false, false}},
+	}
+	out := gh.scan(rows, NullProbe, context.temp_allocator)
+	testing.expect_value(t, len(out), 2)
+
+	_, name_some0 := out[0].name.?
+	_, count_some0 := out[0].count.?
+	testing.expect(t, !name_some0, "NULL name -> None")
+	testing.expect(t, !count_some0, "NULL count -> None")
+
+	name1, name_some1 := out[1].name.?
+	count1, count_some1 := out[1].count.?
+	testing.expect(t, name_some1, "empty-string name -> Some, not None")
+	testing.expect_value(t, name1, "")
+	testing.expect(t, count_some1, "zero count -> Some, not None")
+	testing.expect_value(t, count1, 0)
+}
+
 @(test)
 scan_one_empty_set :: proc(t: ^testing.T) {
 	empty := gh.Pg_Rows {

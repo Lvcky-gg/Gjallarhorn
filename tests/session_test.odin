@@ -92,6 +92,38 @@ session_detects_tampering :: proc(t: ^testing.T) {
 }
 
 @(test)
+session_cookie_hardened :: proc(t: ^testing.T) {
+	// A written session cookie carries HttpOnly + a rolling Max-Age. Secure is
+	// omitted over plaintext (b.ssl == nil) so dev over HTTP still works; it is
+	// added when the request arrives over TLS.
+	b := gh.Bifrost{}
+	gh.session_set(&b, "user", "vidar")
+	line := b.cookies[0]
+	testing.expect(t, strings.contains(line, "HttpOnly"), "session cookie is HttpOnly")
+	testing.expect(t, strings.contains(line, "Max-Age=86400"), "session cookie carries rolling Max-Age")
+	testing.expect(t, !strings.contains(line, "Secure"), "no Secure flag over plaintext")
+}
+
+@(test)
+session_expiry_enforced :: proc(t: ^testing.T) {
+	// Expiry is signed into the token and checked server-side, so a client can't
+	// keep a stale session alive by editing the cookie.
+	m := make(map[string]string, context.temp_allocator)
+	m["user"] = "odin"
+
+	// exp in the past (unix second 1 = 1970): a valid HMAC must not save it.
+	expired := gh.session_seal(m, "k", 1)
+	_, ok := gh.session_unseal(expired, "k")
+	testing.expect(t, !ok, "expired session must be rejected")
+
+	// exp far in the future: verifies and returns the data.
+	future := gh.session_seal(m, "k", 4102444800) // 2100-01-01
+	vals, ok2 := gh.session_unseal(future, "k")
+	testing.expect(t, ok2, "unexpired session verifies")
+	testing.expect_value(t, vals["user"], "odin")
+}
+
+@(test)
 session_wrong_key_rejected :: proc(t: ^testing.T) {
 	// A cookie signed with one secret must not verify under another — so an
 	// attacker who doesn't know the key can't forge a session.

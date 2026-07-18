@@ -7,7 +7,13 @@ package gjallarhorn
 // the tag is checked in constant time; any mismatch — a flipped byte, a swapped
 // payload — is treated as no session at all.
 //
-// Cookie shape:  base64url(json) "." base64url(hmac_sha256(base64url(json)))
+// The signed payload is an envelope { exp, data }: `exp` is a unix-seconds
+// expiry embedded *inside* the HMAC, so expiry is enforced server-side on read —
+// a client can't extend its own session by editing the cookie's Max-Age. The
+// cookie also carries Max-Age (rolling, refreshed on every write) and, over
+// HTTPS, the Secure flag so it's never sent in cleartext.
+//
+// Cookie shape:  base64url(json{exp,data}) "." base64url(hmac_sha256(payload))
 //
 // Values live in the request's temp arena, so a session is per-request: read it,
 // mutate it, and the response carries the updated cookie. session_set rewrites
@@ -19,9 +25,23 @@ import "core:crypto/hmac"
 import "core:encoding/base64"
 import "core:encoding/json"
 import "core:strings"
+import "core:time"
 
 // SESSION_COOKIE is the cookie name the session rides in.
 SESSION_COOKIE :: "gsession"
+
+// SESSION_MAX_AGE is the default session lifetime, in seconds. It sets both the
+// cookie's Max-Age and the signed `exp`, and is refreshed on every write, so an
+// active session rolls forward and an idle one lapses.
+SESSION_MAX_AGE :: 24 * 60 * 60 // 24h
+
+// Session_Envelope is what actually gets signed: the caller's key/value session
+// (`data`) plus an absolute expiry (`exp`, unix seconds; 0 = never). Because
+// `exp` is inside the HMAC, tampering with it invalidates the whole cookie.
+Session_Envelope :: struct {
+	exp:  i64,
+	data: map[string]string,
+}
 
 // session_get reads a value from the session, loading and verifying the cookie
 // on first access. A missing or tampered cookie reads as an empty session.
@@ -48,7 +68,13 @@ session_clear :: proc(b: ^Bifrost) {
 		b,
 		SESSION_COOKIE,
 		"",
-		Cookie_Options{path = "/", http_only = true, same_site = .Lax, max_age = 0},
+		Cookie_Options {
+			path = "/",
+			http_only = true,
+			same_site = .Lax,
+			secure = b.ssl != nil,
+			max_age = 0,
+		},
 	)
 }
 
@@ -78,11 +104,18 @@ session_load :: proc(b: ^Bifrost) {
 // earlier session cookie so only the latest is sent.
 session_flush :: proc(b: ^Bifrost) {
 	session_drop_cookie(b)
+	exp := time.to_unix_seconds(time.now()) + SESSION_MAX_AGE
 	set_cookie(
 		b,
 		SESSION_COOKIE,
-		session_seal(b._session, session_key(b)),
-		Cookie_Options{path = "/", http_only = true, same_site = .Lax},
+		session_seal(b._session, session_key(b), exp),
+		Cookie_Options {
+			path = "/",
+			http_only = true,
+			same_site = .Lax,
+			secure = b.ssl != nil, // Secure only over TLS, so dev over HTTP still works
+			max_age = SESSION_MAX_AGE,
+		},
 	)
 }
 
@@ -112,10 +145,15 @@ session_key :: proc(b: ^Bifrost) -> string {
 	return DEFAULT_SECRET
 }
 
-// session_seal serializes values to JSON, base64url-encodes it, and appends a
-// base64url HMAC tag: "<payload>.<tag>".
-session_seal :: proc(values: map[string]string, key: string) -> string {
-	payload, _ := json.marshal(values, {}, context.temp_allocator)
+// session_seal wraps values with an absolute expiry, serializes the envelope to
+// JSON, base64url-encodes it, and appends a base64url HMAC tag over the whole
+// payload: "<payload>.<tag>". `exp` is unix seconds (0 = never expires).
+session_seal :: proc(values: map[string]string, key: string, exp: i64) -> string {
+	env := Session_Envelope {
+		exp  = exp,
+		data = values,
+	}
+	payload, _ := json.marshal(env, {}, context.temp_allocator)
 	p64 := base64.encode(payload, base64.ENC_URL_TABLE, context.temp_allocator)
 
 	tag: [32]byte
@@ -148,9 +186,14 @@ session_unseal :: proc(raw, key: string) -> (values: map[string]string, valid: b
 	if perr != nil {
 		return nil, false
 	}
-	m := make(map[string]string, context.temp_allocator)
-	if json.unmarshal(payload, &m, allocator = context.temp_allocator) != nil {
+	env: Session_Envelope
+	if json.unmarshal(payload, &env, allocator = context.temp_allocator) != nil {
 		return nil, false
 	}
-	return m, true
+	// Expiry is enforced here, server-side: a well-signed but stale cookie reads
+	// as no session. exp == 0 means the token never expires.
+	if env.exp != 0 && time.to_unix_seconds(time.now()) > env.exp {
+		return nil, false
+	}
+	return env.data, true
 }

@@ -8,7 +8,10 @@
       "Bash(echo \"exit=$?\")",
       "Bash(echo \"release_exit=$?\")",
       "Bash(echo \"test_exit=$?\")",
-      "Bash(echo \"build_exit=$?\")"
+      "Bash(echo \"build_exit=$?\")",
+      "Bash(cd /usr/lib/odin; rg -n \"^to_unix_seconds|^to_unix_nanoseconds|^unix ::|^to_unix\" core/time/time.odin | head)",
+      "Bash(rg -n \"session_set|session_get|session\" sample/*.odin)",
+      "Bash(echo \"build=$?\")"
     ],
     "additionalDirectories": [
       "/home/lvcky/Documents/obsidian/Brain/04_Coding/Solutions",

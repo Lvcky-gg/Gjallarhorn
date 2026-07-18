@@ -20,7 +20,9 @@
       "Bash(pkill -x gj_asan)",
       "Bash(pkill -x gj_asan2)",
       "Bash(pkill -x gj_clean)",
-      "Bash(pkill -x gj)"
+      "Bash(pkill -x gj)",
+      "Bash(ASAN_OPTIONS=detect_leaks=0:abort_on_error=0 odin test ./tests -sanitize:address)",
+      "Bash(kill 190397)"
     ],
     "additionalDirectories": [
       "/home/lvcky/Documents/obsidian/Brain/04_Coding/Solutions"

@@ -18,11 +18,15 @@ bind_json :: proc(b: ^Bifrost, ptr: ^$T) -> bool {
 	return true
 }
 
-// form parses an application/x-www-form-urlencoded body into a map. Keys and
-// values are percent- and '+'-decoded. Lenient by design: blank pairs are
-// skipped and a malformed percent-escape is left literal rather than failing.
+// form returns the request body's text fields as a map. An
+// application/x-www-form-urlencoded body is percent- and '+'-decoded; a
+// multipart/form-data body's non-file parts land here too (files go to files()),
+// so CSRF tokens and ordinary inputs work the same under either encoding. Lenient
+// by design: blank pairs are skipped and a malformed percent-escape is left
+// literal rather than failing. Parsed once and cached on the Bifrost.
 form :: proc(b: ^Bifrost, allocator := context.temp_allocator) -> map[string]string {
-	return parse_query(b.body_text, allocator)
+	load_form(b, allocator)
+	return b._form
 }
 
 // parse_query decodes an `&`-separated, urlencoded key=value sequence into a

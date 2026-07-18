@@ -31,6 +31,12 @@ Bifrost :: struct {
 	// Session state, lazily loaded from the signed cookie on first access.
 	_session:        map[string]string,
 	_session_loaded: bool,
+
+	// Parsed request body, lazily decoded on first form()/files() access. Handles
+	// both urlencoded and multipart/form-data; _files is empty for the former.
+	_form_parsed: bool,
+	_form:        map[string]string,
+	_files:       map[string]Upload,
 }
 
 

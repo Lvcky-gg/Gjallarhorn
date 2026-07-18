@@ -45,6 +45,11 @@ main :: proc() {
 	gh.post(&app, "/logout", logout_handler)
 	gh.get(&app, "/account", account_handler, gh.require_login)
 
+	// Multipart demo: POST a form with a file part (multipart/form-data). The csrf
+	// rune still guards it — the token rides as a normal field, which form() now
+	// surfaces from a multipart body just like a urlencoded one.
+	gh.post(&app, "/upload", upload_handler)
+
 	sample.register(&app)
 	gh.run(&app)
 }
@@ -85,6 +90,29 @@ account_handler :: proc(b: ^gh.Bifrost) {
 			{"user", uid},
 			{"csrf_token", gh.csrf_token(b)},
 			allocator = context.temp_allocator,
+		),
+	)
+}
+
+// upload_handler receives a multipart/form-data POST: a text field plus an
+// uploaded file. It echoes what it decoded, proving files() reads the file bytes
+// exactly and form() still sees the text fields (including the CSRF token).
+upload_handler :: proc(b: ^gh.Bifrost) {
+	title := gh.form(b)["title"]
+	f, ok := gh.upload(b, "file")
+	if !ok {
+		gh.text(b, 400, "expected a `file` part")
+		return
+	}
+	gh.text(
+		b,
+		200,
+		fmt.tprintf(
+			"uploaded: title=%q filename=%q type=%q bytes=%d",
+			title,
+			f.filename,
+			f.content_type,
+			len(f.data),
 		),
 	)
 }

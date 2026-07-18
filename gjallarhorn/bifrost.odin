@@ -75,6 +75,14 @@ not_found :: proc(b: ^Bifrost) {
 	text(b, 404, "404 not found")
 }
 
+// redirect points the browser at `location`. The default 303 See Other turns the
+// follow-up into a GET — the right status after a form POST (POST/redirect/GET),
+// so a refresh doesn't resubmit. Any queued Set-Cookie still rides along.
+redirect :: proc(b: ^Bifrost, location: string, status := 303) {
+	set_header(b, "Location", location)
+	write_response(b, status, "text/plain; charset=utf-8", "")
+}
+
 // header reads a request header by name. Lookup is case-insensitive; parsed
 // keys are stored lower-cased, so the supplied key is lower-cased to match.
 header :: proc(b: ^Bifrost, key: string) -> (string, bool) {

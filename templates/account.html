@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Account — Gjallarhorn</title></head>
+<body>
+  <h1>Welcome, {{ user }}</h1>
+  <p>This page is guarded by the <code>require_login</code> ward — you only see it
+     because your session carries a logged-in user.</p>
+
+  <form method="POST" action="/logout">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit">Log out</button>
+  </form>
+</body>
+</html>

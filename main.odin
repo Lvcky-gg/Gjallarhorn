@@ -37,10 +37,12 @@ main :: proc() {
 	// posting it here passes the csrf rune, which has already verified the token.
 	gh.post(&app, "/submit", submit_handler)
 
-	// Ward demo: POST /login establishes the session (CSRF-protected like any
-	// unsafe method); GET /account is guarded by the require_login ward, so it
-	// answers 401 until the session carries a logged-in user.
+	// Ward demo (full browser flow): GET /pages/login.html is the form (its hidden
+	// field carries the CSRF token from loom_context). POST /login logs the user in
+	// and redirects to /account, which the require_login ward guards. POST /logout
+	// clears the session. All three POSTs pass through the csrf rune.
 	gh.post(&app, "/login", login_handler)
+	gh.post(&app, "/logout", logout_handler)
 	gh.get(&app, "/account", account_handler, gh.require_login)
 
 	sample.register(&app)
@@ -54,19 +56,37 @@ submit_handler :: proc(b: ^gh.Bifrost) {
 	gh.text(b, 200, fmt.tprintf("CSRF ok — received name=%q", name))
 }
 
-// login_handler stands in for real credential checking — the demo just logs in a
-// fixed user, recording it in the signed session so the require_login ward admits
-// later requests.
+// login_handler stands in for real credential checking — the demo logs in the
+// submitted username, recording it in the signed session so the require_login
+// ward admits later requests, then redirects to the guarded page.
 login_handler :: proc(b: ^gh.Bifrost) {
-	gh.login(b, "demo-user")
-	gh.text(b, 200, "logged in as demo-user")
+	username := gh.form(b)["username"]
+	if username == "" {
+		username = "guest"
+	}
+	gh.login(b, username)
+	gh.redirect(b, "/account")
+}
+
+// logout_handler clears the session user and returns to the login form.
+logout_handler :: proc(b: ^gh.Bifrost) {
+	gh.logout(b)
+	gh.redirect(b, "/pages/login.html")
 }
 
 // account_handler is reached only past the require_login ward, so current_user is
-// always present here.
+// always present. It renders the account page with a CSRF-protected logout form.
 account_handler :: proc(b: ^gh.Bifrost) {
 	uid, _ := gh.current_user(b)
-	gh.text(b, 200, fmt.tprintf("account page for %q", uid))
+	gh.render(
+		b,
+		"./templates/account.html",
+		gh.warp(
+			{"user", uid},
+			{"csrf_token", gh.csrf_token(b)},
+			allocator = context.temp_allocator,
+		),
+	)
 }
 
 // loom_context threads the context for templates under /pages. Built fresh per

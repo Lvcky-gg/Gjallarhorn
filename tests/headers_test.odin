@@ -67,6 +67,14 @@ duplicate_transfer_encoding_rejected :: proc(t: ^testing.T) {
 }
 
 @(test)
+redirect_sets_location_and_303 :: proc(t: ^testing.T) {
+	b := gh.Bifrost{}
+	gh.redirect(&b, "/account")
+	testing.expect_value(t, b.status, 303) // See Other: POST -> follow-up GET
+	testing.expect_value(t, b.headers["Location"], "/account")
+}
+
+@(test)
 duplicate_non_framing_header_allowed :: proc(t: ^testing.T) {
 	// Only the framing headers are strict; other duplicates keep last-wins.
 	h, ok := gh.parse_headers("Accept: a\r\nAccept: b", context.temp_allocator)

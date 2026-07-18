@@ -59,6 +59,14 @@ session_set :: proc(b: ^Bifrost, key, value: string) {
 	session_flush(b)
 }
 
+// session_delete removes a single key and refreshes the signed cookie, leaving
+// the rest of the session intact — e.g. logout dropping just the auth key.
+session_delete :: proc(b: ^Bifrost, key: string) {
+	session_load(b)
+	delete_key(&b._session, key)
+	session_flush(b)
+}
+
 // session_clear empties the session and expires the cookie on the client.
 session_clear :: proc(b: ^Bifrost) {
 	session_load(b)

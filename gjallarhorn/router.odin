@@ -7,6 +7,12 @@ import "core:strings"
 
 Handler :: proc(b: ^Bifrost)
 
+// Ward is a route guard (Old Norse vǫrðr, "watcher"). It runs after the path
+// matches but before the handler, and returns true to let the request through.
+// On a false return the handler is skipped; the ward should write its own
+// response (401/403 as fits), and dispatch falls back to 401 if it wrote nothing.
+Ward :: proc(b: ^Bifrost) -> bool
+
 Method :: enum {
 	Get,
 	Post,
@@ -21,23 +27,24 @@ Route :: struct {
 	method:  Method,
 	path:    string, // pattern, may contain :params, e.g. "/sample/:id"
 	handler: Handler,
+	ward:    Ward, // optional guard; nil = open route
 }
 
 
-get :: proc(app: ^App, path: string, handler: Handler) {
-	append(&app.routes, Route{method = .Get, path = path, handler = handler})
+get :: proc(app: ^App, path: string, handler: Handler, ward: Ward = nil) {
+	append(&app.routes, Route{method = .Get, path = path, handler = handler, ward = ward})
 }
 
-post :: proc(app: ^App, path: string, handler: Handler) {
-	append(&app.routes, Route{method = .Post, path = path, handler = handler})
+post :: proc(app: ^App, path: string, handler: Handler, ward: Ward = nil) {
+	append(&app.routes, Route{method = .Post, path = path, handler = handler, ward = ward})
 }
 
-put :: proc(app: ^App, path: string, handler: Handler) {
-	append(&app.routes, Route{method = .Put, path = path, handler = handler})
+put :: proc(app: ^App, path: string, handler: Handler, ward: Ward = nil) {
+	append(&app.routes, Route{method = .Put, path = path, handler = handler, ward = ward})
 }
 
-delete :: proc(app: ^App, path: string, handler: Handler) {
-	append(&app.routes, Route{method = .Delete, path = path, handler = handler})
+delete :: proc(app: ^App, path: string, handler: Handler, ward: Ward = nil) {
+	append(&app.routes, Route{method = .Delete, path = path, handler = handler, ward = ward})
 }
 
 dispatch_route :: proc(b: ^Bifrost) {
@@ -49,6 +56,14 @@ dispatch_route :: proc(b: ^Bifrost) {
 			b.params = params
 			// Hand the handler a decoded path to match its decoded params.
 			b.path = percent_decode(b.path)
+			// A ward guards the handler: deny stops here (with a 401 fallback if
+			// the ward wrote nothing), allow falls through to the handler.
+			if route.ward != nil && !route.ward(b) {
+				if !b.written {
+					text(b, 401, "401 unauthorized")
+				}
+				return
+			}
 			route.handler(b)
 			return
 		}

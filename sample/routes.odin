@@ -2,7 +2,10 @@ package sample
 
 import gh "../gjallarhorn"
 
-// .ward for auth guards
+// Wards (auth guards) attach to a route as the optional 4th arg — the handler
+// runs only if the ward returns true, e.g. a login-gated route:
+//   gh.get(app, "/account", account_handler, gh.require_login)
+// See the /login + /account demo wired in main.odin.
 
 register :: proc(app: ^gh.App) {
 	// Hand Mimir the model; its table is auto-migrated at run(). No SQL here.

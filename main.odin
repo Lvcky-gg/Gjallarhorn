@@ -37,6 +37,12 @@ main :: proc() {
 	// posting it here passes the csrf rune, which has already verified the token.
 	gh.post(&app, "/submit", submit_handler)
 
+	// Ward demo: POST /login establishes the session (CSRF-protected like any
+	// unsafe method); GET /account is guarded by the require_login ward, so it
+	// answers 401 until the session carries a logged-in user.
+	gh.post(&app, "/login", login_handler)
+	gh.get(&app, "/account", account_handler, gh.require_login)
+
 	sample.register(&app)
 	gh.run(&app)
 }
@@ -46,6 +52,21 @@ main :: proc() {
 submit_handler :: proc(b: ^gh.Bifrost) {
 	name := gh.form(b)["name"]
 	gh.text(b, 200, fmt.tprintf("CSRF ok — received name=%q", name))
+}
+
+// login_handler stands in for real credential checking — the demo just logs in a
+// fixed user, recording it in the signed session so the require_login ward admits
+// later requests.
+login_handler :: proc(b: ^gh.Bifrost) {
+	gh.login(b, "demo-user")
+	gh.text(b, 200, "logged in as demo-user")
+}
+
+// account_handler is reached only past the require_login ward, so current_user is
+// always present here.
+account_handler :: proc(b: ^gh.Bifrost) {
+	uid, _ := gh.current_user(b)
+	gh.text(b, 200, fmt.tprintf("account page for %q", uid))
 }
 
 // loom_context threads the context for templates under /pages. Built fresh per

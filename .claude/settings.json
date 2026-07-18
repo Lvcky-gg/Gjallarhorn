@@ -8,7 +8,19 @@
       "Bash(rg -n \"fmt\\\\.\\(e?print|e?printf|e?println|e?printfln|tprintf|sbprint\\)\" gjallarhorn/*.odin)",
       "Bash(rg -rn \"is_terminal|isatty\" /usr/lib/odin/core/os/)",
       "Read(//usr/lib/odin/core/sys/**)",
-      "Bash(pgrep -af \"scratchpad/gj$\")"
+      "Bash(pgrep -af \"scratchpad/gj$\")",
+      "Bash(rg -ln \"open_pair|recv_tcp|wire_send|write_response|run_guarded|dispatch\" tests/*.odin)",
+      "Bash(rg -n \"open_pair ::\" tests/*.odin)",
+      "Bash(pkill -f 'scratchpad/gj')",
+      "Bash(git stash *)",
+      "Bash(rg -rn \"string_literal\\\\\\(\" gjallarhorn/loom/)",
+      "Bash(rg -n \"extends_target ::\" -A 12 gjallarhorn/loom/*.odin)",
+      "Bash(rg -n \"fixture_dir ::\" -A 20 tests/*.odin)",
+      "Bash(pkill -x gj_final)",
+      "Bash(pkill -x gj_asan)",
+      "Bash(pkill -x gj_asan2)",
+      "Bash(pkill -x gj_clean)",
+      "Bash(pkill -x gj)"
     ],
     "additionalDirectories": [
       "/home/lvcky/Documents/obsidian/Brain/04_Coding/Solutions"

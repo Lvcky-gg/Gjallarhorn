@@ -26,7 +26,11 @@ write_response :: proc(b: ^Bifrost, status: int, content_type: string, body: str
 	} else {
 		fmt.sbprint(&sb, "Connection: close\r\n\r\n")
 	}
-	fmt.sbprint(&sb, body)
+	// HEAD (omit_body): the Content-Length above still advertises what GET would
+	// return, but no payload follows (RFC 7231 §4.3.2).
+	if !b.omit_body {
+		fmt.sbprint(&sb, body)
+	}
 
 	wire_send(b.client, b.ssl, transmute([]u8)strings.to_string(sb))
 	b.written = true

@@ -47,31 +47,58 @@ delete :: proc(app: ^App, path: string, handler: Handler, ward: Ward = nil) {
 	append(&app.routes, Route{method = .Delete, path = path, handler = handler, ward = ward})
 }
 
+patch :: proc(app: ^App, path: string, handler: Handler, ward: Ward = nil) {
+	append(&app.routes, Route{method = .Patch, path = path, handler = handler, ward = ward})
+}
+
+// head registers an explicit HEAD handler. Usually unnecessary: a HEAD with no
+// explicit handler is answered by the matching GET route with the body dropped
+// (see dispatch_route), which is the RFC-correct default.
+head :: proc(app: ^App, path: string, handler: Handler, ward: Ward = nil) {
+	append(&app.routes, Route{method = .Head, path = path, handler = handler, ward = ward})
+}
+
+// options registers an explicit OPTIONS handler. Note the built-in `cors` rune
+// already answers preflight OPTIONS with 204 before dispatch, so this matters
+// only for apps not using that rune.
+options :: proc(app: ^App, path: string, handler: Handler, ward: Ward = nil) {
+	append(&app.routes, Route{method = .Options, path = path, handler = handler, ward = ward})
+}
+
 dispatch_route :: proc(b: ^Bifrost) {
+	// HEAD is answered exactly like GET but with the payload suppressed at write
+	// time (RFC 7231 §4.3.2): same headers, same Content-Length, no body.
+	b.omit_body = b.method == .Head
+
+	// Exact method match first — this also serves an explicitly registered HEAD
+	// or OPTIONS route.
 	for route in b._app.routes {
 		if route.method != b.method {
 			continue
 		}
 		if params, ok := match_path(route.path, b.path); ok {
-			b.params = params
-			// Hand the handler a decoded path to match its decoded params.
-			b.path = percent_decode(b.path)
-			// A ward guards the handler: deny stops here (with a 401 fallback if
-			// the ward wrote nothing), allow falls through to the handler.
-			if route.ward != nil && !route.ward(b) {
-				if !b.written {
-					text(b, 401, "401 unauthorized")
-				}
-				return
-			}
-			route.handler(b)
+			run_matched_route(b, route, params)
 			return
 		}
 	}
 
-	// Mounts (GET only). First mount whose prefix matches handles it; template
-	// mounts are tried before raw static ones.
-	if b.method == .Get {
+	// HEAD with no explicit HEAD route: answer it with the matching GET route.
+	// omit_body (set above) makes write_response drop the payload.
+	if b.method == .Head {
+		for route in b._app.routes {
+			if route.method != .Get {
+				continue
+			}
+			if params, ok := match_path(route.path, b.path); ok {
+				run_matched_route(b, route, params)
+				return
+			}
+		}
+	}
+
+	// Mounts serve GET, and HEAD over the same files. First mount whose prefix
+	// matches handles it; template mounts are tried before raw static ones.
+	if b.method == .Get || b.method == .Head {
 		for mount in b._app.looms {
 			if under_prefix(b.path, mount.url_prefix) {
 				if serve_loom(b, mount) {
@@ -89,6 +116,24 @@ dispatch_route :: proc(b: ^Bifrost) {
 	}
 
 	not_found(b)
+}
+
+// run_matched_route runs a matched route's ward (if any) then its handler,
+// sharing the path-decode + ward-fallback logic between the exact-match and the
+// HEAD→GET fallback passes.
+run_matched_route :: proc(b: ^Bifrost, route: Route, params: map[string]string) {
+	b.params = params
+	// Hand the handler a decoded path to match its decoded params.
+	b.path = percent_decode(b.path)
+	// A ward guards the handler: deny stops here (with a 401 fallback if the ward
+	// wrote nothing), allow falls through to the handler.
+	if route.ward != nil && !route.ward(b) {
+		if !b.written {
+			text(b, 401, "401 unauthorized")
+		}
+		return
+	}
+	route.handler(b)
 }
 
 // Segment-wise match. ":name" segments capture into params.

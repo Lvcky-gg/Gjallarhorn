@@ -22,6 +22,7 @@ Bifrost :: struct {
 	written:     bool,
 	status:      int,               // final response status, recorded by write_response (for logging)
 	keep_alive:  bool,              // reuse the socket after this response
+	omit_body:   bool,              // write headers only, no payload — set for HEAD (RFC 7231 §4.3.2)
 
 	// Chain state, driven by `next`. Underscored: not for handler use.
 	_app:      ^App,

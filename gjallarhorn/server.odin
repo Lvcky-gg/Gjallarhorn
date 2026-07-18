@@ -269,11 +269,48 @@ read_request :: proc(
 		req_headers = hdrs
 	}
 
-	// Phase 2: body, framed by Content-Length. Absent it (e.g. a GET), there
-	// is no body — we must not swallow a pipelined follow-up request.
+	// Phase 2: body. Framed by Transfer-Encoding: chunked when present, else by
+	// Content-Length. Absent both (e.g. a GET), there is no body — we must not
+	// swallow a pipelined follow-up request.
 	body_start := header_end + 4
+	te, has_te := req_headers["transfer-encoding"]
+	_, has_cl := req_headers["content-length"]
+
+	if has_te {
+		// Request-smuggling defense (RFC 7230 §3.3.3): a message carrying BOTH
+		// Transfer-Encoding and Content-Length is ambiguous — a front-end and
+		// back-end can disagree on the body boundary. Reject rather than guess.
+		if has_cl {
+			return {}, 0, 400, false, false
+		}
+		// We implement `chunked` only. Any other coding (or chunked bundled with
+		// another, which we can't decode) is refused, never mis-framed as smuggling.
+		if !body_is_chunked(te) {
+			return {}, 0, 501, false, false
+		}
+		body, end, st, bok, bclosed := read_chunked_body(conn, body_start, max_body, allocator)
+		if bclosed {
+			return {}, 0, 0, false, true
+		}
+		if !bok {
+			return {}, 0, st, false, false
+		}
+		b = Bifrost {
+			method      = method,
+			path        = path,
+			query       = query,
+			req_headers = req_headers,
+			body        = body,
+			body_text   = string(body),
+			client      = conn.socket,
+			ssl         = conn.ssl,
+			keep_alive  = keep_alive_wanted(version, req_headers),
+		}
+		return b, end, 0, true, false
+	}
+
 	content_length := 0
-	if cl, has_cl := req_headers["content-length"]; has_cl {
+	if cl, ok := req_headers["content-length"]; ok {
 		parsed, pok := strconv.parse_int(strings.trim_space(cl))
 		if !pok || parsed < 0 {
 			return {}, 0, 400, false, false
@@ -304,6 +341,120 @@ read_request :: proc(
 		keep_alive  = keep_alive_wanted(version, req_headers),
 	}
 	return b, body_start + content_length, 0, true, false
+}
+
+// body_is_chunked reports whether a Transfer-Encoding header names `chunked` as
+// its sole coding. We deliberately accept only a lone `chunked` (case-insensitive)
+// — a stack like "gzip, chunked" needs codings we don't implement, so we refuse
+// it rather than under-decode and desync the stream.
+body_is_chunked :: proc(te: string) -> bool {
+	return strings.to_lower(strings.trim_space(te), context.temp_allocator) == "chunked"
+}
+
+// CHUNK_LINE_MAX caps a chunk-size line (hex size + any extensions). A line with
+// no CRLF inside this bound is treated as malformed, so a peer can't grow the
+// read buffer without end.
+CHUNK_LINE_MAX :: 1024
+
+// read_chunked_body decodes a Transfer-Encoding: chunked request body starting at
+// conn.buf[body_start], filling from the socket as needed. It returns the
+// reassembled body (in `allocator`) and `end`, the absolute index in conn.buf
+// just past the terminating chunk — so the caller drops exactly the framing bytes
+// and a pipelined next request stays intact. On a malformed body it returns
+// ok=false with a status; closed=true means the peer hung up mid-body. The
+// decoded size is capped at max_body (413) before each chunk is buffered, so a
+// hostile stream can't exhaust memory (GH-0xx request-smuggling hardening).
+read_chunked_body :: proc(
+	conn: ^Conn,
+	body_start, max_body: int,
+	allocator := context.temp_allocator,
+) -> (
+	body: []u8,
+	end: int,
+	status: int,
+	ok: bool,
+	closed: bool,
+) {
+	decoded := make([dynamic]u8, 0, 256, allocator)
+	pos := body_start
+	for {
+		// chunk-size line: <hex>[;ext]CRLF
+		crlf, lok, lclosed := find_crlf_fill(conn, pos, CHUNK_LINE_MAX)
+		if lclosed {
+			return {}, 0, 0, false, true
+		}
+		if !lok {
+			return {}, 0, 400, false, false
+		}
+		line := string(conn.buf[pos:crlf])
+		if sc := strings.index_byte(line, ';'); sc >= 0 {
+			line = line[:sc] // drop chunk extensions
+		}
+		size, sok := strconv.parse_int(strings.trim_space(line), 16)
+		if !sok || size < 0 {
+			return {}, 0, 400, false, false
+		}
+		pos = crlf + 2 // past the CRLF after the size line
+
+		if size == 0 {
+			// Last chunk. Consume any trailer header lines up to the blank line
+			// that ends the message.
+			tcrlf, tok, tclosed := find_crlf_fill(conn, pos, MAX_HEADER)
+			if tclosed {
+				return {}, 0, 0, false, true
+			}
+			if !tok {
+				return {}, 0, 400, false, false
+			}
+			for tcrlf != pos { // non-empty line => a trailer; skip it
+				pos = tcrlf + 2
+				tcrlf, tok, tclosed = find_crlf_fill(conn, pos, MAX_HEADER)
+				if tclosed {
+					return {}, 0, 0, false, true
+				}
+				if !tok {
+					return {}, 0, 400, false, false
+				}
+			}
+			return decoded[:], tcrlf + 2, 0, true, false // past the final blank line
+		}
+
+		// Reject before buffering the chunk, so a huge declared size can't force
+		// an oversized read.
+		if len(decoded) + size > max_body {
+			return {}, 0, 413, false, false
+		}
+		// Need `size` data bytes plus the trailing CRLF.
+		for len(conn.buf) < pos + size + 2 {
+			if !conn_fill(conn) {
+				return {}, 0, 0, false, true
+			}
+		}
+		if string(conn.buf[pos + size:pos + size + 2]) != "\r\n" {
+			return {}, 0, 400, false, false // data not CRLF-terminated
+		}
+		append(&decoded, ..conn.buf[pos:pos + size])
+		pos = pos + size + 2
+	}
+}
+
+// find_crlf_fill ensures conn.buf holds a CRLF at or after `from`, pulling more
+// bytes as needed, and returns that CRLF's index. `limit` bounds how far past
+// `from` we scan without a terminator, so a line that never ends can't grow the
+// buffer unbounded (returns ok=false past the limit). closed=true means the peer
+// hung up first.
+find_crlf_fill :: proc(conn: ^Conn, from, limit: int) -> (idx: int, ok: bool, closed: bool) {
+	for {
+		if i := strings.index(string(conn.buf[from:]), "\r\n"); i >= 0 {
+			return from + i, true, false
+		}
+		if len(conn.buf) - from > limit {
+			return 0, false, false
+		}
+		if !conn_fill(conn) {
+			return 0, false, true
+		}
+	}
 }
 
 // conn_fill pulls one chunk off the socket onto conn.buf. Returns false when

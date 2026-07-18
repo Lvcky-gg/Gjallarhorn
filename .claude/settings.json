@@ -14,11 +14,14 @@
       "Bash(echo \"build=$?\")",
       "Bash(cd /home/lvcky/gjallarhorn; echo \"=== sample model ===\"; cat sample/model.odin; echo \"=== Maybe def in odin core ===\"; rg -n \"Maybe ::\" /usr/lib/odin/base/runtime/*.odin /usr/lib/odin/core/**/*.odin 2>/dev/null | head; echo \"=== reflect union helpers ===\"; rg -n \"Type_Info_Union|union_variant_type|get_union_variant|set_union\" /usr/lib/odin/core/reflect/reflect.odin | head)",
       "Read(//usr/lib/odin/base/runtime/**)",
-      "Read(//usr/lib/odin/core/reflect/**)"
+      "Read(//usr/lib/odin/core/reflect/**)",
+      "Bash(cd /home/lvcky/gjallarhorn; echo \"=== conn_consume + conn_fill + Conn ===\"; rg -n \"conn_consume ::|conn_fill ::|Conn ::|READ_CHUNK|MAX_HEADER ::|conn.buf\" gjallarhorn/server.odin | head; echo \"=== strconv hex parse API ===\"; rg -n \"^parse_int ::|^parse_i64 ::|parse_i64_of_base|parse_int_of_base\" /usr/lib/odin/core/strconv/strconv.odin | head)",
+      "Read(//usr/lib/odin/core/strconv/**)"
     ],
     "additionalDirectories": [
       "/home/lvcky/Documents/obsidian/Brain/04_Coding/Solutions",
-      "/home/lvcky/Documents/obsidian/Brain/04_Coding"
+      "/home/lvcky/Documents/obsidian/Brain/04_Coding",
+      "/home/lvcky/Documents/obsidian/Brain/04_Coding/Patterns"
     ]
   }
 }

@@ -63,6 +63,8 @@ status_text :: proc(status: int) -> string {
 		return "Payload Too Large"
 	case 500:
 		return "Internal Server Error"
+	case 501:
+		return "Not Implemented"
 	}
 	return "OK"
 }

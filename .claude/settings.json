@@ -19,7 +19,9 @@
       "Read(//usr/lib/odin/core/strconv/**)",
       "Bash(rg -n \"rand|nonce|crypto\\\\.|csprng|random\" gjallarhorn/*.odin)",
       "Bash(rg -n \"Method ::|\\\\.Get|\\\\.Post|\\\\.Put|\\\\.Delete|\\\\.Options|\\\\.Head|parse_method\" gjallarhorn/*.odin)",
-      "Read(//usr/lib/odin/core/crypto/**)"
+      "Read(//usr/lib/odin/core/crypto/**)",
+      "Bash(git add *)",
+      "Bash(git commit *)"
     ],
     "additionalDirectories": [
       "/home/lvcky/Documents/obsidian/Brain/04_Coding/Solutions",

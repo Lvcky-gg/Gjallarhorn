@@ -4,10 +4,12 @@ package gjallarhorn
 // then hand the Bifrost to the rune chain. Connections are kept alive and
 // reused across requests per RFC 7230 (see handle_connection).
 
+import "core:c/libc"
 import "core:net"
 import "core:fmt"
 import "core:strings"
 import "core:strconv"
+import "core:sync"
 import "core:thread"
 import "core:time"
 
@@ -88,17 +90,95 @@ run :: proc(app: ^App) {
 		paint(pretty, "\e[1;36m", url),
 	)
 
-	// One thread per connection. accept_tcp is the only thing the accept loop
-	// blocks on; request handling (which may stall on a slow client) is pushed
-	// onto a self-cleaning worker thread, so a slow peer never holds the loop.
-	// The TLS handshake runs on the worker too, so a slow client cannot stall it.
-	for {
+	// Graceful shutdown + never dying on a broken pipe. SIGINT/SIGTERM flip the
+	// shutdown flag (the workers below drain and exit); SIGPIPE is ignored so a
+	// client that hangs up mid-response makes send() return an error we handle,
+	// not a signal that kills the process.
+	install_signal_handlers()
+
+	// Bounded worker pool. A fixed set of threads each accept on the shared
+	// listening socket — the kernel hands each new connection to exactly one — so
+	// concurrency is capped at app.workers instead of spawning an unbounded thread
+	// per connection (a cheap resource-exhaustion DoS). Excess connections wait in
+	// the kernel's accept backlog. A short accept timeout lets each worker notice a
+	// shutdown request between connections and exit.
+	net.set_option(net.Any_Socket(sock), .Receive_Timeout, ACCEPT_POLL)
+
+	workers := make([]^thread.Thread, app.workers)
+	for i in 0 ..< app.workers {
+		workers[i] = thread.create_and_start_with_poly_data2(
+			app,
+			sock,
+			accept_worker,
+			self_cleanup = false,
+		)
+	}
+
+	// Park the main thread until a signal requests shutdown.
+	for !sync.atomic_load(&_shutting_down) {
+		time.sleep(200 * time.Millisecond)
+	}
+
+	// Drain: workers stop taking new connections and finish in-flight requests,
+	// then exit; join them so shutdown waits for the drain (bounded by IDLE_TIMEOUT
+	// for a worker parked on a slow keep-alive read). The deferred socket/TLS
+	// teardown then runs as run() returns.
+	logft(.Info, "gjallarhorn", "shutting down: draining %d workers", app.workers)
+	for w in workers {
+		thread.join(w)
+		thread.destroy(w)
+	}
+	delete_slice(workers) // builtin; package `delete` is the route verb
+	disconnect(app) // close the DB connection pool
+	logft(.Info, "gjallarhorn", "shut down cleanly")
+}
+
+// ---------------------------------------------------------------------------
+// Graceful shutdown
+// ---------------------------------------------------------------------------
+
+// _shutting_down is flipped by the signal handler and read (atomically) by the
+// accept workers and the keep-alive loop. Package-global because a C signal
+// handler can carry no context.
+@(private)
+_shutting_down: bool
+
+// SIGPIPE is not exported by core:c/libc; it's 13 on Linux (the target here).
+@(private)
+SIGPIPE :: 13
+
+// ACCEPT_POLL bounds how long a worker blocks in accept before looping to
+// re-check the shutdown flag — so Ctrl-C is noticed within this window.
+ACCEPT_POLL :: 300 * time.Millisecond
+
+_handle_shutdown_signal :: proc "c" (sig: i32) {
+	sync.atomic_store(&_shutting_down, true)
+}
+
+install_signal_handlers :: proc() {
+	libc.signal(libc.SIGINT, _handle_shutdown_signal)
+	libc.signal(libc.SIGTERM, _handle_shutdown_signal)
+	ignore := transmute(proc "c" (i32))libc.SIG_IGN
+	libc.signal(SIGPIPE, ignore)
+}
+
+// accept_worker is one thread of the pool: accept a connection off the shared
+// listening socket and serve it to completion, then take the next — until a
+// shutdown is requested. The accept timeout (ACCEPT_POLL) makes the flag check
+// responsive even with no traffic.
+accept_worker :: proc(app: ^App, sock: net.TCP_Socket) {
+	for !sync.atomic_load(&_shutting_down) {
 		client, _, accept_err := net.accept_tcp(sock)
 		if accept_err != nil {
-			logft(.Error, "gjallarhorn", "accept error: %v", accept_err)
+			#partial switch accept_err {
+			case .Would_Block, .Interrupted:
+			// accept timed out (poll tick) or was interrupted — loop and re-check.
+			case:
+				logft(.Error, "gjallarhorn", "accept error: %v", accept_err)
+			}
 			continue
 		}
-		thread.run_with_poly_data3(app, client, app.tls_ctx, handle_worker)
+		handle_worker(app, client, app.tls_ctx)
 	}
 }
 
@@ -213,6 +293,13 @@ handle_connection :: proc(app: ^App, client: net.TCP_Socket, ssl: rawptr) {
 		free_all(context.temp_allocator)
 
 		if !keep {
+			return
+		}
+		// Graceful drain: once shutdown is requested, finish the in-flight request
+		// (already done above) but take no further request on this kept-alive
+		// connection, so the worker returns promptly instead of parking on the next
+		// read up to the idle timeout.
+		if sync.atomic_load(&_shutting_down) {
 			return
 		}
 	}

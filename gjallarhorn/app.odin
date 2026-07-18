@@ -46,6 +46,10 @@ Ssl_Mode :: enum {
 DEFAULT_MAX_BODY :: 1 << 20 // 1 MiB
 // DEFAULT_POOL_SIZE is the connection-pool size when Config.pool_size is zero.
 DEFAULT_POOL_SIZE :: 4
+// DEFAULT_WORKERS is the size of the connection worker pool when Config.workers
+// is left zero — the cap on concurrent connections (each holds one worker for its
+// lifetime), so a connection flood can't spawn unbounded threads (see server.odin).
+DEFAULT_WORKERS :: 256
 
 // DEFAULT_SECRET signs session cookies when Config.secret is left empty. It is a
 // fixed, public string — fine for local dev, useless for security. Set a real
@@ -60,6 +64,7 @@ Config :: struct {
 	postgres:  Postgres_Config,
 	max_body:  int,    // largest request body accepted; 0 -> DEFAULT_MAX_BODY
 	pool_size: int,    // DB connections to pool; 0 -> DEFAULT_POOL_SIZE
+	workers:   int,    // max concurrent connections (worker threads); 0 -> DEFAULT_WORKERS
 	secret:    string, // key signing session cookies; empty -> DEFAULT_SECRET
 	// HTTPS (GH-054): set both to serve TLS instead of plaintext HTTP. PEM files.
 	// Requires a TLS build (-define:GJ_TLS=true); otherwise startup fails loudly.
@@ -72,6 +77,7 @@ App :: struct {
 	port:       int,
 	max_body:   int,         // largest request body accepted, in bytes
 	pool_size:  int,         // DB connection-pool size; see postgres.odin
+	workers:    int,         // connection worker-pool size; see server.odin
 	db_type:    DB_Type,     // dialect Mimir speaks; see mimir.odin
 	secret:     string,      // key signing session cookies; see session.odin
 	tls_cert:   string,      // PEM cert chain path; with tls_key, serves HTTPS (GH-054)
@@ -95,6 +101,10 @@ new :: proc(cfg: Config) -> App {
 	if pool_size <= 0 {
 		pool_size = DEFAULT_POOL_SIZE
 	}
+	workers := cfg.workers
+	if workers <= 0 {
+		workers = DEFAULT_WORKERS
+	}
 	// The insecure-default-secret check lives at start time (run), not here, so
 	// tests can construct an App without a secret. See run() in server.odin.
 	return App {
@@ -102,6 +112,7 @@ new :: proc(cfg: Config) -> App {
 		port      = cfg.port,
 		max_body  = max_body,
 		pool_size = pool_size,
+		workers   = workers,
 		db_type   = cfg.db_type,
 		secret    = cfg.secret,
 		tls_cert  = cfg.tls_cert,

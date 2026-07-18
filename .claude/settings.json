@@ -16,7 +16,10 @@
       "Read(//usr/lib/odin/base/runtime/**)",
       "Read(//usr/lib/odin/core/reflect/**)",
       "Bash(cd /home/lvcky/gjallarhorn; echo \"=== conn_consume + conn_fill + Conn ===\"; rg -n \"conn_consume ::|conn_fill ::|Conn ::|READ_CHUNK|MAX_HEADER ::|conn.buf\" gjallarhorn/server.odin | head; echo \"=== strconv hex parse API ===\"; rg -n \"^parse_int ::|^parse_i64 ::|parse_i64_of_base|parse_int_of_base\" /usr/lib/odin/core/strconv/strconv.odin | head)",
-      "Read(//usr/lib/odin/core/strconv/**)"
+      "Read(//usr/lib/odin/core/strconv/**)",
+      "Bash(rg -n \"rand|nonce|crypto\\\\.|csprng|random\" gjallarhorn/*.odin)",
+      "Bash(rg -n \"Method ::|\\\\.Get|\\\\.Post|\\\\.Put|\\\\.Delete|\\\\.Options|\\\\.Head|parse_method\" gjallarhorn/*.odin)",
+      "Read(//usr/lib/odin/core/crypto/**)"
     ],
     "additionalDirectories": [
       "/home/lvcky/Documents/obsidian/Brain/04_Coding/Solutions",

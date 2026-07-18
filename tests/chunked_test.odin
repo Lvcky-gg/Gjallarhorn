@@ -5,6 +5,7 @@ package tests
 // the body AND consume exactly its bytes, so a pipelined follow-up request can't
 // be smuggled in the leftover. Run with: odin test ./tests
 
+import "core:fmt"
 import "core:net"
 import "core:testing"
 import gh "../gjallarhorn"
@@ -119,4 +120,81 @@ unsupported_transfer_encoding_rejected :: proc(t: ^testing.T) {
 	_, _, status, ok, _ := gh.read_request(&conn, 1 << 20)
 	testing.expect(t, !ok, "unsupported Transfer-Encoding must be rejected")
 	testing.expect_value(t, status, 501)
+}
+
+@(test)
+noncanonical_content_length_rejected :: proc(t: ^testing.T) {
+	// Content-Length must be strict 1*DIGIT. A prefixed (0x..), separated (1_0),
+	// or signed (+5) value is accepted by strconv.parse_int but not by a
+	// conforming intermediary — the length discrepancy is a smuggling vector, so
+	// we reject it 400 rather than trust our own lenient read.
+	bad := []string{"0x10", "1_0", "+5", "0b1000", "0o17"}
+	for cl in bad {
+		server, client, paired := open_pair(t)
+		if !paired {
+			return
+		}
+		defer net.close(server)
+		defer net.close(client)
+
+		req := fmt.tprintf(
+			"POST /u HTTP/1.1\r\nHost: x\r\nContent-Length: %s\r\n\r\n0123456789ABCDEF",
+			cl,
+		)
+		net.send_tcp(client, transmute([]u8)req)
+
+		conn := gh.Conn {
+			socket = server,
+			buf    = make([dynamic]u8, context.temp_allocator),
+		}
+		_, _, status, ok, _ := gh.read_request(&conn, 1 << 20)
+		testing.expectf(t, !ok, "non-canonical Content-Length %q must be rejected", cl)
+		testing.expect_value(t, status, 400)
+	}
+}
+
+@(test)
+canonical_content_length_still_accepted :: proc(t: ^testing.T) {
+	// The strict path must not regress the ordinary case.
+	server, client, paired := open_pair(t)
+	if !paired {
+		return
+	}
+	defer net.close(server)
+	defer net.close(client)
+
+	req := "POST /u HTTP/1.1\r\nHost: x\r\nContent-Length: 5\r\n\r\nhello"
+	net.send_tcp(client, transmute([]u8)req)
+
+	conn := gh.Conn {
+		socket = server,
+		buf    = make([dynamic]u8, context.temp_allocator),
+	}
+	b, _, _, ok, _ := gh.read_request(&conn, 1 << 20)
+	testing.expect(t, ok, "a plain decimal Content-Length must still parse")
+	testing.expect_value(t, b.body_text, "hello")
+}
+
+@(test)
+noncanonical_chunk_size_rejected :: proc(t: ^testing.T) {
+	// A chunk size is strict 1*HEXDIG. `1_0` (underscore) parses to 16 under
+	// strconv but is invalid framing a conforming peer rejects — reject it 400.
+	server, client, paired := open_pair(t)
+	if !paired {
+		return
+	}
+	defer net.close(server)
+	defer net.close(client)
+
+	req: string = "POST /u HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n" +
+		"1_0\r\nhello\r\n0\r\n\r\n"
+	net.send_tcp(client, transmute([]u8)req)
+
+	conn := gh.Conn {
+		socket = server,
+		buf    = make([dynamic]u8, context.temp_allocator),
+	}
+	_, _, status, ok, _ := gh.read_request(&conn, 1 << 20)
+	testing.expect(t, !ok, "non-canonical chunk size must be rejected")
+	testing.expect_value(t, status, 400)
 }

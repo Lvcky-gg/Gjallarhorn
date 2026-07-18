@@ -311,7 +311,16 @@ read_request :: proc(
 
 	content_length := 0
 	if cl, ok := req_headers["content-length"]; ok {
-		parsed, pok := strconv.parse_int(strings.trim_space(cl))
+		// Content-Length must be a pure decimal run (RFC 7230 §3.3.2, 1*DIGIT).
+		// strconv.parse_int is far more permissive — it accepts 0x/0o/0b prefixes,
+		// `_` digit separators, and a leading `+` — so an intermediary and this
+		// server could frame the body differently (request smuggling). Validate
+		// the digits ourselves before trusting the value.
+		digits := strings.trim_space(cl)
+		if !is_decimal(digits) {
+			return {}, 0, 400, false, false
+		}
+		parsed, pok := strconv.parse_int(digits)
 		if !pok || parsed < 0 {
 			return {}, 0, 400, false, false
 		}
@@ -341,6 +350,36 @@ read_request :: proc(
 		keep_alive  = keep_alive_wanted(version, req_headers),
 	}
 	return b, body_start + content_length, 0, true, false
+}
+
+// is_decimal reports whether `s` is a non-empty run of ASCII digits only — the
+// strict `1*DIGIT` a Content-Length must be, with none of strconv.parse_int's
+// prefix/underscore/sign leniency that would open a framing discrepancy.
+is_decimal :: proc(s: string) -> bool {
+	if len(s) == 0 {
+		return false
+	}
+	for i in 0 ..< len(s) {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// is_hex reports whether `s` is a non-empty run of ASCII hex digits only — the
+// strict `1*HEXDIG` a chunk size must be (extensions already stripped upstream).
+is_hex :: proc(s: string) -> bool {
+	if len(s) == 0 {
+		return false
+	}
+	for i in 0 ..< len(s) {
+		c := s[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
 }
 
 // body_is_chunked reports whether a Transfer-Encoding header names `chunked` as
@@ -390,7 +429,15 @@ read_chunked_body :: proc(
 		if sc := strings.index_byte(line, ';'); sc >= 0 {
 			line = line[:sc] // drop chunk extensions
 		}
-		size, sok := strconv.parse_int(strings.trim_space(line), 16)
+		// The chunk size is a pure hex run (RFC 7230 §4.1, 1*HEXDIG). Explicit
+		// base 16 already blocks a 0x prefix, but parse_int still accepts `_`
+		// separators and a leading `+`, which a conforming intermediary rejects —
+		// the same framing-discrepancy class as Content-Length above.
+		hexdigits := strings.trim_space(line)
+		if !is_hex(hexdigits) {
+			return {}, 0, 400, false, false
+		}
+		size, sok := strconv.parse_int(hexdigits, 16)
 		if !sok || size < 0 {
 			return {}, 0, 400, false, false
 		}

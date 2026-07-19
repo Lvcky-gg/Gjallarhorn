@@ -25,15 +25,16 @@ pkgver() {
 
 build() {
 	cd "$srcdir/$_pkgname"
-	# The CLI is a standalone Odin program (cli/); build the `gjallarhorn` command.
-	odin build cli -out:gjallarhorn -o:speed
+	# The CLI is a standalone Odin program (cli/). Output to `gjallarhorn.bin` — a
+	# plain `-out:gjallarhorn` would collide with the gjallarhorn/ library dir.
+	odin build cli -out:gjallarhorn.bin -o:speed
 }
 
 package() {
 	cd "$srcdir/$_pkgname"
 
 	# The `gjallarhorn` command.
-	install -Dm755 gjallarhorn "$pkgdir/usr/bin/gjallarhorn"
+	install -Dm755 gjallarhorn.bin "$pkgdir/usr/bin/gjallarhorn"
 
 	# The framework source, which `gjallarhorn new` vendors into a project. The CLI
 	# looks here (see library_source() in cli/main.odin); GJALLARHORN_LIB overrides.

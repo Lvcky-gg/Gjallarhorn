@@ -1,1 +1,3 @@
 gjallarhorn.bin
+# built CLI binary (odin build cli -out:gh)
+/gh

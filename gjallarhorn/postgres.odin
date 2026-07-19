@@ -30,6 +30,7 @@ import "core:crypto/sha2"
 import "core:crypto/legacy/md5"
 import "core:encoding/base64"
 import "core:encoding/hex"
+import "core:encoding/uuid"
 
 Pg_Conn :: struct {
 	sock: net.TCP_Socket,
@@ -725,6 +726,11 @@ encode_arg :: proc(a: any, allocator := context.temp_allocator) -> (text: string
 			y, int(mo), d, h, mi, s,
 			allocator = allocator,
 		), true
+	case Uuid:
+		return uuid.to_string(uuid.Identifier(v), allocator), true
+	case Json:
+		// Raw JSON text; a JSONB column parses/validates it on the server.
+		return strings.clone(string(v), allocator), true
 	}
 	return "", false
 }
@@ -759,6 +765,18 @@ encode_bind :: proc(a: any, allocator := context.temp_allocator) -> (text: strin
 	case Maybe(string):
 		m, has := v.?; if !has {return "", true, true}
 		t, e := encode_arg(m, allocator); return t, false, e
+	case Maybe(time.Time):
+		m, has := v.?; if !has {return "", true, true}
+		t, e := encode_arg(m, allocator); return t, false, e
+	case Maybe([]u8):
+		m, has := v.?; if !has {return "", true, true}
+		t, e := encode_arg(m, allocator); return t, false, e
+	case Maybe(Uuid):
+		m, has := v.?; if !has {return "", true, true}
+		t, e := encode_arg(m, allocator); return t, false, e
+	case Maybe(Json):
+		m, has := v.?; if !has {return "", true, true}
+		t, e := encode_arg(m, allocator); return t, false, e
 	}
 	if a == nil {
 		return "", true, true
@@ -771,6 +789,85 @@ encode_bind :: proc(a: any, allocator := context.temp_allocator) -> (text: strin
 bytea_text :: proc(b: []u8, allocator := context.temp_allocator) -> string {
 	encoded, _ := hex.encode(b, allocator)
 	return strings.concatenate({"\\x", string(encoded)}, allocator)
+}
+
+// parse_bytea decodes Postgres's `bytea` hex output ("\x<hexdigits>") back to raw
+// bytes — the read-side mirror of bytea_text. Returns an empty slice for "\x".
+parse_bytea :: proc(s: string, allocator := context.temp_allocator) -> ([]u8, bool) {
+	hexpart := s
+	if strings.has_prefix(s, "\\x") {
+		hexpart = s[2:]
+	}
+	if hexpart == "" {
+		return []u8{}, true
+	}
+	return hex.decode(transmute([]u8)hexpart, allocator)
+}
+
+// parse_pg_timestamp parses a Postgres timestamp/timestamptz text value into a
+// time.Time. It accepts "YYYY-MM-DD HH:MM:SS", an optional ".ffffff" fraction,
+// and an optional "±HH[:MM]" / "Z" zone; the offset is folded out so the Time is
+// the correct UTC instant. ok=false on anything malformed.
+parse_pg_timestamp :: proc(s: string) -> (time.Time, bool) {
+	if len(s) < 19 {
+		return {}, false
+	}
+	fixed :: proc(s: string) -> (int, bool) {return strconv.parse_int(s)}
+	y, y_ok := fixed(s[0:4])
+	mo, mo_ok := fixed(s[5:7])
+	d, d_ok := fixed(s[8:10])
+	h, h_ok := fixed(s[11:13])
+	mi, mi_ok := fixed(s[14:16])
+	se, se_ok := fixed(s[17:19])
+	if !(y_ok && mo_ok && d_ok && h_ok && mi_ok && se_ok) {
+		return {}, false
+	}
+
+	i := 19
+	nsec := 0
+	if i < len(s) && s[i] == '.' {
+		i += 1
+		digits: [9]u8
+		for k in 0 ..< 9 {
+			digits[k] = '0'
+		}
+		k := 0
+		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+			if k < 9 {
+				digits[k] = s[i]
+			}
+			k += 1
+			i += 1
+		}
+		nsec, _ = strconv.parse_int(string(digits[:]))
+	}
+
+	off_sec := 0
+	if i < len(s) && (s[i] == '+' || s[i] == '-') {
+		sign := s[i] == '-' ? -1 : 1
+		i += 1
+		oh := 0
+		om := 0
+		if i + 2 <= len(s) {
+			oh, _ = strconv.parse_int(s[i:i + 2]);i += 2
+		}
+		if i < len(s) && s[i] == ':' {
+			i += 1
+		}
+		if i + 2 <= len(s) {
+			om, _ = strconv.parse_int(s[i:i + 2]);i += 2
+		}
+		off_sec = sign * (oh * 3600 + om * 60)
+	}
+
+	t, ok := time.components_to_time(y, mo, d, h, mi, se, nsec)
+	if !ok {
+		return {}, false
+	}
+	// components_to_time reads the fields as the wall clock at the stated offset;
+	// subtract the offset to land on the absolute UTC instant.
+	t._nsec -= i64(off_sec) * 1_000_000_000
+	return t, true
 }
 
 // ---------------------------------------------------------------------------

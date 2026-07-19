@@ -1,0 +1,80 @@
+name: main
+
+# Build + test on every push to main, then publish the refreshed package to the
+# AUR (gjallarhorn-git). The deploy only runs if the build/tests pass.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+# Never let two AUR deploys race each other.
+concurrency:
+  group: aur-deploy
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      # Mirrors docker-compose.yml, so the Mímir/Postgres tests run for real
+      # (they skip gracefully if the DB is unreachable).
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: secret
+          POSTGRES_DB: gjallarhorn
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U app -d gjallarhorn"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # Odin has no apt package; this action fetches an official release.
+      - name: Install Odin
+        uses: laytan/setup-odin@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build framework, sample app, and CLI
+        run: |
+          odin build . -out:/tmp/gjallarhorn-app
+          odin build cli -out:/tmp/gjallarhorn.bin   # `.bin` so it doesn't collide with gjallarhorn/
+
+      - name: Test (against the postgres service on 127.0.0.1:5432)
+        run: odin test ./tests
+
+  deploy-aur:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so the -git pkgver reflects the real commit count
+
+      - name: Stamp pkgver from the current commit
+        run: |
+          count=$(git rev-list --count HEAD)
+          short=$(git rev-parse --short=7 HEAD)
+          sed -i "s/^pkgver=.*/pkgver=r${count}.${short}/" packaging/aur/PKGBUILD
+          echo "pkgver -> r${count}.${short}"
+
+      # Runs makepkg in an Arch container to regenerate .SRCINFO, commits both
+      # files to the AUR git repo, and pushes over SSH. No-op pushes are skipped.
+      - name: Publish gjallarhorn-git to the AUR
+        uses: KSXGitHub/github-actions-deploy-aur@v2.7.2
+        with:
+          pkgname: gjallarhorn-git
+          pkgbuild: ./packaging/aur/PKGBUILD
+          commit_username: ${{ github.actor }}
+          commit_email: matadorcrab@gmail.com
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "deploy: main @ ${{ github.sha }}"
+          ssh_keyscan_types: ed25519

@@ -69,8 +69,9 @@ usage :: proc() {
 }
 
 // gen_new scaffolds a new project directory: a minimal, runnable main.odin plus a
-// vendored copy of the gjallarhorn library (when this is run from a checkout that
-// has ./gjallarhorn), so `cd <app> && odin run .` works immediately.
+// vendored copy of the gjallarhorn library (resolved via library_source, so it
+// works both from a checkout and from a system install), so that
+// `cd <app> && odin run .` works immediately.
 gen_new :: proc(name: string) -> int {
 	if !valid_project(name) {
 		fmt.eprintfln("invalid app name %q: use letters, digits, '_' or '-'", name)
@@ -85,14 +86,15 @@ gen_new :: proc(name: string) -> int {
 		return 1
 	}
 
-	// Vendor the library so the new project is self-contained. Only when we can
-	// see ./gjallarhorn (i.e. run from a checkout); otherwise print how to add it.
+	// Vendor the library so the new project is self-contained. The source is
+	// resolved from GJALLARHORN_LIB, then ./gjallarhorn (a checkout), then the
+	// system install path the package writes to (see library_source).
 	vendored := false
-	if os.exists("gjallarhorn") && os.is_directory("gjallarhorn") {
+	if src, ok := library_source(); ok {
 		dst := strings.concatenate({name, "/gjallarhorn"}, context.temp_allocator)
-		if copy_tree("gjallarhorn", dst) {
+		if copy_tree(src, dst) {
 			vendored = true
-			fmt.println("  vendored gjallarhorn/")
+			fmt.printfln("  vendored gjallarhorn/ (from %s)", src)
 		} else {
 			fmt.eprintln("  warning: could not fully vendor gjallarhorn/")
 		}
@@ -118,12 +120,39 @@ gen_new :: proc(name: string) -> int {
 	fmt.println("    # -> http://127.0.0.1:8091/hello/world")
 	if !vendored {
 		fmt.println("")
-		fmt.println("NOTE: gjallarhorn/ was not found to vendor — copy the framework package")
-		fmt.printfln("      into %s/gjallarhorn (see the README's Install section).", name)
+		fmt.println("NOTE: could not find the framework to vendor. Set GJALLARHORN_LIB to the")
+		fmt.printfln("      gjallarhorn package dir, or copy it into %s/gjallarhorn manually.", name)
 	}
 	fmt.println("")
 	fmt.println("Add a CRUD resource with:  gh generate resource <name>")
 	return 0
+}
+
+// library_source resolves the gjallarhorn library package directory to vendor
+// from, so `new` works both from a checkout and when installed as a package. It
+// checks, in order: the GJALLARHORN_LIB env var, ./gjallarhorn (a checkout or an
+// existing project), then /usr/share/gjallarhorn/gjallarhorn (the install path
+// the AUR package writes to).
+library_source :: proc() -> (string, bool) {
+	if v, found := os.lookup_env("GJALLARHORN_LIB", context.temp_allocator); found && is_library_dir(v) {
+		return v, true
+	}
+	for c in ([]string{"gjallarhorn", "/usr/share/gjallarhorn/gjallarhorn"}) {
+		if is_library_dir(c) {
+			return c, true
+		}
+	}
+	return "", false
+}
+
+// is_library_dir reports whether `path` looks like the gjallarhorn package — a
+// directory carrying a marker source file — so we never vendor a stray folder.
+is_library_dir :: proc(path: string) -> bool {
+	if path == "" || !os.is_directory(path) {
+		return false
+	}
+	marker := strings.concatenate({path, "/mimir.odin"}, context.temp_allocator)
+	return os.exists(marker)
 }
 
 // copy_tree recursively copies the directory `src` into `dst` (created if absent).
@@ -226,6 +255,14 @@ gen_resource :: proc(name: string) -> int {
 			return 1
 		}
 		fmt.printfln("  created %s", path)
+	}
+
+	// The generated package imports `../gjallarhorn`; warn (don't fail) if this
+	// isn't a project with the framework vendored as a sibling.
+	if !is_library_dir("gjallarhorn") {
+		fmt.println("")
+		fmt.println("  note: no ./gjallarhorn here — run this inside a project created by")
+		fmt.println("        `gjallarhorn new`, so the resource's `../gjallarhorn` import resolves.")
 	}
 
 	fmt.println("")

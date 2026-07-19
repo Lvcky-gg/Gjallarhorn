@@ -618,11 +618,24 @@ Contributions toward any of the above are the most useful place to start.
 
 ## The CLI — scaffolding (`nest`-style)
 
-Build the CLI once, then use it to bootstrap a project and generate resources:
+**Arch Linux (AUR):** install the `gjallarhorn` command:
+
+```sh
+yay -S gjallarhorn-git          # or: paru -S gjallarhorn-git
+gjallarhorn new blog            # command is `gjallarhorn` once installed
+```
+
+The package installs the `gjallarhorn` binary plus the framework source (under
+`/usr/share/gjallarhorn`), which `gjallarhorn new` vendors into your project — so
+you don't need a checkout. (`GJALLARHORN_LIB` overrides that source path.)
+
+**From a checkout**, build the CLI yourself:
 
 ```sh
 odin build cli -out:gh          # or run inline: odin run cli -- <args>
 ```
+
+(Examples below use `gh`; substitute `gjallarhorn` when installed from the AUR.)
 
 ### `gh new <app>` — a whole new app
 

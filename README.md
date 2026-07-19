@@ -616,11 +616,57 @@ Contributions toward any of the above are the most useful place to start.
 
 ---
 
+## The CLI — scaffolding (`nest`-style)
+
+Build the CLI once, then use it to bootstrap a project and generate resources:
+
+```sh
+odin build cli -out:gh          # or run inline: odin run cli -- <args>
+```
+
+### `gh new <app>` — a whole new app
+
+Scaffolds a new, **immediately runnable** project — a minimal `main.odin`, a
+`docker-compose.yml` for Postgres, a `.gitignore`, and a vendored copy of the
+framework (when run from a checkout that has `./gjallarhorn`):
+
+```sh
+./gh new blog
+cd blog && odin run .           # -> http://127.0.0.1:8091/hello/world
+```
+
+The starter `main.odin` boots without a database (a `/hello/:name` route); the
+ORM config is there commented out, ready to uncomment.
+
+### `gh generate resource <name>` — a CRUD resource
+
+Generates a `model` + `controller` + `routes` trio mirroring `./sample` (alias
+`g res`):
+
+```sh
+./gh generate resource users
+#   created users/model.odin  users/controller.odin  users/routes.odin
+```
+
+The resource name is plural; the model struct is its singular (`users` → `User`),
+so Mímir's table comes out as `users`. It never overwrites existing files. Wire
+it into `main.odin` as the command prints:
+
+```odin
+import "users"
+// ...inside main(), after gh.new():
+users.register(&app)   // remembers the model + registers GET/POST/PUT/DELETE
+```
+
+That gives you `GET /users/:id`, `POST /users`, `PUT /users/:id`,
+`DELETE /users/:id` — edit `users/model.odin` to shape the table.
+
 ## Project layout
 
 ```
 .
 ├── gjallarhorn/        # the framework (package gjallarhorn)
+├── cli/                # the `gh` scaffolding CLI (odin build cli -out:gh)
 ├── sample/             # a small MVC example app
 ├── templates/          # Loom templates served at /pages
 ├── docs/               # the static docs site served at /docs

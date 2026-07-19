@@ -15,6 +15,8 @@ optdepends=('openssl: TLS support in generated apps (build with -define:GJ_TLS=t
             'docker-compose: local Postgres for the ORM')
 provides=('gjallarhorn')
 conflicts=('gjallarhorn')
+# The CLI is a stripped release binary; skip the (empty) debug split.
+options=('!debug')
 source=("$_pkgname::git+https://github.com/Lvcky-gg/Gjallarhorn.git")
 sha256sums=('SKIP')
 

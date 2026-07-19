@@ -26,7 +26,11 @@
       "Bash(docker version *)",
       "Bash(pacman -Ss '^odin$')",
       "Bash(command -v odin)",
-      "Bash(makepkg --printsrcinfo)"
+      "Bash(makepkg --printsrcinfo)",
+      "Bash(git fetch *)",
+      "Bash(git rev-list *)",
+      "Bash(git ls-tree *)",
+      "Bash(ssh -o BatchMode=yes -o ConnectTimeout=8 aur@aur.archlinux.org help)"
     ],
     "additionalDirectories": [
       "/home/lvcky/Documents/obsidian/Brain/04_Coding/Solutions"

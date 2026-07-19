@@ -12,6 +12,7 @@ pkgbase = gjallarhorn-git
 	optdepends = docker-compose: local Postgres for the ORM
 	provides = gjallarhorn
 	conflicts = gjallarhorn
+	options = !debug
 	source = gjallarhorn::git+https://github.com/Lvcky-gg/Gjallarhorn.git
 	sha256sums = SKIP
 

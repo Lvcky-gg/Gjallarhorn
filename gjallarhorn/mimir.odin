@@ -23,10 +23,22 @@ package gjallarhorn
 // string. Every value is a bound parameter ($1.. for Postgres, ? otherwise).
 
 import "base:runtime"
+import "core:encoding/uuid"
 import "core:fmt"
 import "core:strconv"
 import "core:strings"
 import "core:reflect"
+import "core:time"
+
+// Uuid is a Postgres UUID column, carried as core:encoding/uuid's 16-byte
+// Identifier. A model field of this type maps to `UUID` and round-trips through
+// scan/bind. (Alias, not distinct, so it interops with the uuid package.)
+Uuid :: uuid.Identifier
+
+// Json is a JSON/JSONB column carried as its raw text. A model field of this type
+// maps to `JSONB`; scan hands back the server's text and bind sends it verbatim
+// (Postgres parses/validates it), so callers marshal/unmarshal at the edges.
+Json :: distinct string
 
 
 Well :: struct {
@@ -182,6 +194,30 @@ sql_type :: proc(d: DB_Type, id: typeid) -> string {
 		switch d {
 		case .MySQL:               return "VARCHAR(255)"
 		case .Postgres, .SQLite:   return "TEXT"
+		}
+	case time.Time:
+		switch d {
+		case .Postgres: return "TIMESTAMPTZ"
+		case .MySQL:    return "DATETIME"
+		case .SQLite:   return "TEXT"
+		}
+	case []u8:
+		switch d {
+		case .Postgres: return "BYTEA"
+		case .MySQL:    return "BLOB"
+		case .SQLite:   return "BLOB"
+		}
+	case Uuid:
+		switch d {
+		case .Postgres: return "UUID"
+		case .MySQL:    return "CHAR(36)"
+		case .SQLite:   return "TEXT"
+		}
+	case Json:
+		switch d {
+		case .Postgres: return "JSONB"
+		case .MySQL:    return "JSON"
+		case .SQLite:   return "TEXT"
 		}
 	}
 	return "TEXT"
@@ -563,7 +599,16 @@ scan_one :: proc(rows: Pg_Rows, $T: typeid, allocator := context.temp_allocator)
 	if len(rows.rows) == 0 {
 		return {}, false
 	}
-	head := Pg_Rows{columns = rows.columns, rows = rows.rows[:1]}
+	// Carry the NULL mask for the first row too — without it scan sees every cell
+	// as non-null and a NULL column hydrates a Maybe(T) field to Some("") instead
+	// of None (GH-024).
+	head := Pg_Rows {
+		columns = rows.columns,
+		rows    = rows.rows[:1],
+	}
+	if len(rows.nulls) > 0 {
+		head.nulls = rows.nulls[:1]
+	}
 	return scan(head, T, allocator)[0], true
 }
 
@@ -605,6 +650,22 @@ set_field :: proc(ptr: rawptr, id: typeid, text: string, is_null: bool, allocato
 		(^Maybe(string))(ptr)^ = nil
 		if !is_null {(^Maybe(string))(ptr)^ = strings.clone(text, allocator)}
 		return
+	case Maybe(time.Time):
+		(^Maybe(time.Time))(ptr)^ = nil
+		if !is_null {if v, ok := parse_pg_timestamp(text); ok {(^Maybe(time.Time))(ptr)^ = v}}
+		return
+	case Maybe([]u8):
+		(^Maybe([]u8))(ptr)^ = nil
+		if !is_null {if v, ok := parse_bytea(text, allocator); ok {(^Maybe([]u8))(ptr)^ = v}}
+		return
+	case Maybe(Uuid):
+		(^Maybe(Uuid))(ptr)^ = nil
+		if !is_null {if v, err := uuid.read(text); err == .None {(^Maybe(Uuid))(ptr)^ = Uuid(v)}}
+		return
+	case Maybe(Json):
+		(^Maybe(Json))(ptr)^ = nil
+		if !is_null {(^Maybe(Json))(ptr)^ = Json(strings.clone(text, allocator))}
+		return
 	}
 
 	// Plain (non-nullable) field: a SQL NULL leaves the zero value and never
@@ -639,6 +700,14 @@ set_field :: proc(ptr: rawptr, id: typeid, text: string, is_null: bool, allocato
 		(^bool)(ptr)^ = parse_pg_bool(text)
 	case string:
 		(^string)(ptr)^ = strings.clone(text, allocator)
+	case time.Time:
+		if v, ok := parse_pg_timestamp(text); ok {(^time.Time)(ptr)^ = v}
+	case []u8:
+		if v, ok := parse_bytea(text, allocator); ok {(^[]u8)(ptr)^ = v}
+	case Uuid:
+		if v, err := uuid.read(text); err == .None {(^Uuid)(ptr)^ = Uuid(v)}
+	case Json:
+		(^Json)(ptr)^ = Json(strings.clone(text, allocator))
 	}
 }
 

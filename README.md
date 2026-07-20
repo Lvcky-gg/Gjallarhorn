@@ -649,6 +649,22 @@ gh.hail(&app, "/pages", "./templates", provider)  // files woven by Loom
 **Path traversal is the checkpoint here:** a resolved path is cleaned and must
 stay inside the mount root, else `403`.
 
+**Caching.** Every static file is served with an `ETag` (from its size + mtime),
+`Last-Modified`, and `Cache-Control`. A conditional re-request that still matches
+— `If-None-Match` (ETag) or `If-Modified-Since` — gets a **`304 Not Modified`
+with no body**, so a returning visitor re-downloads nothing until the file
+actually changes. Tune the policy with `gh.static_cache_control` (default
+`"public, max-age=3600"`; for content-hashed filenames, `"public,
+max-age=31536000, immutable"`).
+
+**Precompressed gzip (`gzip_static`).** If a sibling `<file>.gz` exists and the
+client sent `Accept-Encoding: gzip`, that file is served with
+`Content-Encoding: gzip` and `Vary: Accept-Encoding` — typed by the *original*
+extension. Compress your assets ahead of time (`gzip -k style.css`) or in your
+build. Gjallarhorn does **not** compress on the fly: Odin's core ships a gzip
+*decompressor* but no compressor, and a default build takes no third-party deps
+(same stance as TLS).
+
 ---
 
 ## TLS / HTTPS
@@ -783,10 +799,11 @@ panic recovery; cookies and HMAC-signed sessions with server-enforced expiry;
 guards) with `login`/`logout`/`current_user`, and **Argon2id password hashing**; the ORM's full read/write/transaction path with struct hydration
 over `int`/`float`/`bool`/`string`, `time.Time`, `uuid`, `bytea`, `JSONB`, and
 `Maybe(T)` nullables; SCRAM-SHA-256 auth; connection pooling; optional TLS on
-both the DB connection and the HTTP server; template inheritance, includes,
-whitespace control, the compiled-node cache, and direct struct rendering;
-leveled/structured logging; a scaffolding CLI; and CI that tests and publishes to
-the AUR on every push to `main`.
+both the DB connection and the HTTP server; static-file caching (ETag /
+Last-Modified / conditional `304`) and precompressed `gzip_static`; template
+inheritance, includes, macros, whitespace control, the compiled-node cache, and
+direct struct rendering; leveled/structured logging; a scaffolding CLI; and CI
+that tests and publishes to the AUR on every push to `main`.
 
 **Known gaps**, in rough order of impact:
 
@@ -798,6 +815,10 @@ the AUR on every push to `main`.
 - **Macros are positional-only.** `{% macro %}` / `{{ call(args) }}` / `{% import %}`
   are in, but without Jinja's keyword args, defaults, or namespaced import
   (`import … as`); an imported macro shares the global macro namespace.
+- **No on-the-fly compression.** gzip is precompressed-only (`gzip_static`) —
+  Odin core has a gzip decompressor but no compressor, and a default build adds
+  no third-party deps. Precompress assets in your build, or put a compressing
+  proxy in front.
 - **TLS is opt-in and depends on system OpenSSL** (by design — a default build has
   no TLS and no libssl). `.Verify_Full` trusts only the system CA bundle, and
   certs are loaded once at boot.

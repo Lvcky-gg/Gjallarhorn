@@ -61,6 +61,8 @@ status_text :: proc(status: int) -> string {
 		return "Found"
 	case 303:
 		return "See Other"
+	case 304:
+		return "Not Modified"
 	case 400:
 		return "Bad Request"
 	case 403:

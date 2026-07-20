@@ -388,6 +388,19 @@ gh.remember(app, Event)   <span class="c">// migrate() carves + alters the table
       </p>
       <pre class="code"><span class="c">// Serve ./docs at /docs — this page lives here.</span>
 gh.hail(&amp;app, <span class="s">"/docs"</span>, <span class="s">"./docs"</span>)</pre>
+
+      <p class="prose">
+        Static files are <strong>cacheable</strong>: each carries an
+        <code>ETag</code> (size + mtime), <code>Last-Modified</code>, and
+        <code>Cache-Control</code>, and a still-fresh conditional re-request
+        (<code>If-None-Match</code> / <code>If-Modified-Since</code>) is answered
+        <code>304 Not Modified</code> with no body — so a returning visitor
+        re-downloads nothing until a file changes. And if a precompressed
+        <code>&lt;file&gt;.gz</code> sits beside the original, it's served with
+        <code>Content-Encoding: gzip</code> to clients that accept it
+        (<code>gzip_static</code>-style) — compression done ahead of time, since a
+        default build takes no third-party deps.
+      </p>
     </section>
 
     <!-- LOOM -->

@@ -14,15 +14,18 @@ Node_Kind :: enum {
 	Block,   // {% block name %}…{% endblock %} — name in `text`, default in body
 	Extends, // {% extends "base" %} — base template name in `text`
 	Include, // {% include "partial" %} — partial template name in `text`
+	Macro,   // {% macro name(p…) %}…{% endmacro %} — name in `text`, params, body
+	Import,  // {% import "file" %} — pull that file's macros in; name in `text`
 }
 
 Node :: struct {
-	kind: Node_Kind,
-	text: string, // Text literal | Output expr | If condition | Block/Extends name
-	ivar: string, // For: loop variable
-	iter: string, // For: iterable expression
-	body: [dynamic]Node,
-	alt:  [dynamic]Node,
+	kind:   Node_Kind,
+	text:   string, // Text literal | Output expr | If condition | Block/Extends/Macro name
+	ivar:   string, // For: loop variable
+	iter:   string, // For: iterable expression
+	params: []string, // Macro: parameter names, in order
+	body:   [dynamic]Node,
+	alt:    [dynamic]Node,
 }
 
 Parser :: struct {
@@ -82,6 +85,19 @@ parse_block :: proc(p: ^Parser, stops: []string) -> (nodes: [dynamic]Node, term:
 					return nodes, "", .Bad_Syntax
 				}
 				append(&nodes, Node{kind = .Include, text = name})
+			case "import":
+				p.pos += 1
+				name := string_literal(after_keyword(t.value, "import"))
+				if name == "" {
+					return nodes, "", .Bad_Syntax
+				}
+				append(&nodes, Node{kind = .Import, text = name})
+			case "macro":
+				n, e := parse_macro(p)
+				if e != .None {
+					return nodes, "", e
+				}
+				append(&nodes, n)
 			case:
 				return nodes, "", .Unknown_Tag
 			}
@@ -198,4 +214,40 @@ parse_block_node :: proc(p: ^Parser) -> (Node, Loom_Error) {
 	node.body = body
 	p.pos += 1 // consume endblock
 	return node, .None
+}
+
+// parse_macro reads {% macro name(p1, p2) %} … {% endmacro %}. The parameter list
+// is positional; names are sliced from the tag text (which slices the template
+// source), so they live as long as the cached node tree.
+parse_macro :: proc(p: ^Parser) -> (Node, Loom_Error) {
+	tag := p.toks[p.pos]
+	p.pos += 1
+	spec := after_keyword(tag.value, "macro") // "name(p1, p2)"
+
+	lp := strings.index_byte(spec, '(')
+	rp := strings.last_index_byte(spec, ')')
+	if lp < 1 || rp < lp {
+		return {}, .Bad_Syntax // needs a name and a parenthesised (possibly empty) list
+	}
+	name := strings.trim_space(spec[:lp])
+	if name == "" {
+		return {}, .Bad_Syntax
+	}
+
+	params := make([dynamic]string, context.allocator)
+	for part in strings.split(spec[lp + 1:rp], ",", context.allocator) {
+		if pname := strings.trim_space(part); pname != "" {
+			append(&params, pname)
+		}
+	}
+
+	body, term, e := parse_block(p, {"endmacro"})
+	if e != .None {
+		return {}, e
+	}
+	if term != "endmacro" {
+		return {}, .Unexpected_End
+	}
+	p.pos += 1 // consume endmacro
+	return Node{kind = .Macro, text = name, params = params[:], body = body}, .None
 }

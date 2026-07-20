@@ -121,12 +121,59 @@ weave_nodes :: proc(nodes: [dynamic]Node, ctx: Warp, dir: string, allocator: run
 		return "", err
 	}
 
+	// Hoist macro definitions (and {% import %}s) so a call may precede its
+	// definition, from both the woven template and the base it extends.
+	if merr := register_macros(root, &rc, 0); merr != .None {
+		return "", merr
+	}
+	if merr := register_macros(nodes, &rc, 0); merr != .None {
+		return "", merr
+	}
+
 	local := ctx // a header copy we may add scratch bindings (loop, loop vars) to
 	sb := strings.builder_make(allocator)
 	if rerr := render_nodes(&sb, root, &local, &rc); rerr != .None {
 		return strings.to_string(sb), rerr
 	}
 	return strings.to_string(sb), .None
+}
+
+// Macro is a defined {% macro %}: its positional parameter names and its body.
+Macro :: struct {
+	params: []string,
+	body:   [dynamic]Node,
+}
+
+// register_macros walks a template's top-level nodes, recording every {% macro %}
+// in rc.macros and following each {% import %} to pull that file's macros in too.
+// Later definitions win, so an import can be overridden by a local macro. depth
+// guards import cycles.
+register_macros :: proc(nodes: [dynamic]Node, rc: ^Render_Ctx, depth: int) -> Loom_Error {
+	if depth > MAX_INCLUDE_DEPTH {
+		return .Include_Too_Deep
+	}
+	for n in nodes {
+		#partial switch n.kind {
+		case .Import:
+			path, ok := safe_path(rc.dir, n.text)
+			if !ok {
+				return .Forbidden_Path
+			}
+			imported, e := load_template(path)
+			if e != .None {
+				return e
+			}
+			if e := register_macros(imported, rc, depth + 1); e != .None {
+				return e
+			}
+		case .Macro:
+			if rc.macros == nil {
+				rc.macros = make(map[string]Macro, context.temp_allocator)
+			}
+			rc.macros[n.text] = Macro{params = n.params, body = n.body}
+		}
+	}
+	return .None
 }
 
 // parse_src lexes and parses `src` into a node tree allocated with `allocator`.

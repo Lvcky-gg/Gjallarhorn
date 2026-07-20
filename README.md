@@ -598,6 +598,24 @@ Bases resolve against the template's own mount dir, and `{% extends %}` chains
 with the current context (loop vars and all). Partials resolve their own
 inheritance, so an included file may itself `{% extends %}` a base.
 
+**Macros** — reusable fragments, defined once and called like a function.
+`{% import "forms.html" %}` pulls another file's macros into the current template.
+
+```html
+{% macro field(name, label) %}
+  <label>{{ label }} <input name="{{ name }}"></label>
+{% endmacro %}
+
+{{ field("email", "Email") }}   <!-- -> <label>Email <input name="email"></label> -->
+```
+
+A macro sees only its arguments — not the caller's local variables — so it's a
+predictable, self-contained unit. Its body is treated as markup (not
+re-escaped), while `{{ param }}` interpolations inside it *are* escaped, so it's
+XSS-safe by default. Calls are hoisted, so one may appear before its definition.
+Arguments are positional (no keyword args or defaults yet); a missing argument is
+empty, and calling an undefined macro renders nothing.
+
 **Path traversal is the checkpoint here too:** `extends`/`include` names are
 clamped to the mount dir (same clean-and-contain check as the static mounts), so
 `{% include "../../etc/passwd" %}` is refused.
@@ -777,8 +795,9 @@ the AUR on every push to `main`.
 - **Keep-alive holds a worker.** Concurrency is bounded (`Config.workers`,
   default 256) rather than unbounded, but a slow client still occupies its worker
   for the connection's life — size the pool accordingly.
-- **Templates have no `{% macro %}`.** Inheritance, includes, and whitespace
-  control are in; macros are not.
+- **Macros are positional-only.** `{% macro %}` / `{{ call(args) }}` / `{% import %}`
+  are in, but without Jinja's keyword args, defaults, or namespaced import
+  (`import … as`); an imported macro shares the global macro namespace.
 - **TLS is opt-in and depends on system OpenSSL** (by design — a default build has
   no TLS and no libssl). `.Verify_Full` trusts only the system CA bundle, and
   certs are loaded once at boot.

@@ -1,15 +1,19 @@
 <!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><title>CSRF demo — Gjallarhorn</title></head>
+{% macro text_field(name, label, value) %}
+  <label>{{ label }}: <input type="text" name="{{ name }}" value="{{ value }}"></label>
+{% endmacro %}
 <body>
   <h1>CSRF-protected form</h1>
   <p>This form carries the session's CSRF token in a hidden field. Posting it to
      <code>/submit</code> passes the <code>csrf</code> rune; tampering with or
-     dropping the token gets a 403.</p>
+     dropping the token gets a 403. The field below is rendered by a reusable
+     Loom macro.</p>
 
   <form method="POST" action="/submit">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <label>Name: <input type="text" name="name" value="Heimdallr"></label>
+    {{ text_field("name", "Name", "Heimdallr") }}
     <button type="submit">Send</button>
   </form>
 </body>

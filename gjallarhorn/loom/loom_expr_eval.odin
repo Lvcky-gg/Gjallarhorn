@@ -39,11 +39,12 @@ Interp :: struct {
 	toks: []Etok,
 	pos:  int,
 	ctx:  ^Warp,
+	rc:   ^Render_Ctx, // for macro calls: name -> Macro, and the recursion guard
 }
 
-eval :: proc(src: string, ctx: ^Warp) -> Eval {
+eval :: proc(src: string, ctx: ^Warp, rc: ^Render_Ctx = nil) -> Eval {
 	toks := lex_expr(src, context.temp_allocator)
-	it := Interp{toks = toks[:], pos = 0, ctx = ctx}
+	it := Interp{toks = toks[:], pos = 0, ctx = ctx, rc = rc}
 	return ev_or(&it)
 }
 
@@ -168,6 +169,11 @@ ev_primary :: proc(it: ^Interp) -> Eval {
 		case "nil", "none", "None":
 			return Eval{nil, false}
 		}
+		// A bare identifier immediately followed by "(" is a macro call, e.g.
+		// {{ field("email", "Email") }}. (Dotted names fall through to path lookup.)
+		if peek(it).kind == .LParen {
+			return call_macro(it, t.text)
+		}
 		parts := make([dynamic]string, context.temp_allocator)
 		append(&parts, t.text)
 		for {
@@ -188,6 +194,47 @@ ev_primary :: proc(it: ^Interp) -> Eval {
 		return Eval{nil, false}
 	}
 	return Eval{nil, false}
+}
+
+// call_macro evaluates a macro invocation `name(arg, …)`. Positional args bind to
+// the macro's parameters in a fresh scope (a macro sees only its arguments, not
+// the caller's locals — predictable, and can't clobber the caller's bindings).
+// The body is rendered to a string and returned as safe: a macro emits markup its
+// author wrote, so it isn't re-escaped, while `{{ param }}` inside it still is.
+// An unknown macro renders empty, matching how an unknown variable evaluates nil.
+call_macro :: proc(it: ^Interp, name: string) -> Eval {
+	adv(it) // consume "("
+	args := make([dynamic]Value, context.temp_allocator)
+	for peek(it).kind != .RParen && peek(it).kind != .End {
+		append(&args, ev_or(it).val)
+		if peek(it).kind == .Comma {
+			adv(it)
+		} else {
+			break
+		}
+	}
+	if peek(it).kind == .RParen {
+		adv(it)
+	}
+
+	if it.rc == nil {
+		return Eval{nil, false}
+	}
+	m, ok := it.rc.macros[name]
+	if !ok || it.rc.macro_depth >= MAX_INCLUDE_DEPTH {
+		return Eval{nil, false}
+	}
+
+	scope := make(Warp, len(m.params), context.temp_allocator)
+	for pname, i in m.params {
+		scope[pname] = i < len(args) ? args[i] : nil
+	}
+
+	it.rc.macro_depth += 1
+	sb := strings.builder_make(context.temp_allocator)
+	render_nodes(&sb, m.body, &scope, it.rc) // best-effort; eval has no error channel
+	it.rc.macro_depth -= 1
+	return Eval{strings.to_string(sb), true}
 }
 
 lookup_path :: proc(ctx: ^Warp, parts: []string) -> Value {

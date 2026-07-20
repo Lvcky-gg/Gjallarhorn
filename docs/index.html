@@ -421,7 +421,21 @@ gh.hail(&amp;app, <span class="s">"/docs"</span>, <span class="s">"./docs"</span
         <div class="verb"><b>{% if %}</b><span>branch</span><em>if / elif / else / endif</em></div>
         <div class="verb"><b>{% for %}</b><span>iterate</span><em>for x in xs … else (empty case) … endfor, with a loop binding</em></div>
         <div class="verb"><b>extends</b><span>inheritance</span><em>extends / block / include compose templates</em></div>
+        <div class="verb"><b>{% macro %}</b><span>reuse</span><em>define once, call as {{ name(args) }}; {% import %} across files</em></div>
       </div>
+
+      <p class="prose">
+        <strong>Macros</strong> are reusable fragments — define one with
+        <code>{% macro %}</code> and call it like a function; <code>{% import %}</code>
+        pulls another file's macros in. A macro sees only its arguments (not the
+        caller's locals), and its output is treated as markup, while
+        <code>{{ param }}</code> interpolations inside it are still escaped:
+      </p>
+      <pre class="code">{% macro field(name, label) %}
+  &lt;label&gt;{{ label }} &lt;input name=<span class="s">"{{ name }}"</span>&gt;&lt;/label&gt;
+{% endmacro %}
+
+{{ field(<span class="s">"email"</span>, <span class="s">"Email"</span>) }}   <span class="c">// -> &lt;label&gt;Email &lt;input name="email"&gt;&lt;/label&gt;</span></pre>
 
       <div class="note">
         <strong>XSS is the checkpoint.</strong> Every <code>{{ … }}</code> is

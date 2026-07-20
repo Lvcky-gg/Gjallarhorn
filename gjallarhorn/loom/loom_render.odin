@@ -9,9 +9,11 @@ import "core:strings"
 // `dir` is the directory {% include %} resolves partials against; `depth` guards
 // against runaway include recursion.
 Render_Ctx :: struct {
-	blocks: map[string][dynamic]Node,
-	dir:    string,
-	depth:  int,
+	blocks:      map[string][dynamic]Node,
+	macros:      map[string]Macro, // {% macro %} defs + {% import %}ed ones, by name
+	dir:         string,
+	depth:       int, // {% include %} depth
+	macro_depth: int, // macro-call depth (recursion guard)
 }
 
 render_nodes :: proc(sb: ^strings.Builder, nodes: [dynamic]Node, ctx: ^Warp, rc: ^Render_Ctx) -> Loom_Error {
@@ -20,9 +22,9 @@ render_nodes :: proc(sb: ^strings.Builder, nodes: [dynamic]Node, ctx: ^Warp, rc:
 		case .Text:
 			strings.write_string(sb, n.text)
 		case .Output:
-			render_output(sb, n.text, ctx)
+			render_output(sb, n.text, ctx, rc)
 		case .If:
-			branch := truthy(eval(n.text, ctx).val) ? n.body : n.alt
+			branch := truthy(eval(n.text, ctx, rc).val) ? n.body : n.alt
 			if e := render_nodes(sb, branch, ctx, rc); e != .None {
 				return e
 			}
@@ -44,6 +46,8 @@ render_nodes :: proc(sb: ^strings.Builder, nodes: [dynamic]Node, ctx: ^Warp, rc:
 			if e := render_include(sb, n.text, ctx, rc); e != .None {
 				return e
 			}
+		case .Macro, .Import:
+			// Definitions, not output — hoisted into rc.macros before rendering.
 		}
 	}
 	return .None
@@ -76,12 +80,19 @@ render_include :: proc(sb: ^strings.Builder, name: string, ctx: ^Warp, rc: ^Rend
 		dir    = rc.dir,
 		depth  = rc.depth + 1,
 	}
+	// The partial's own macros/imports are in scope while it renders.
+	if merr := register_macros(root, &sub, 0); merr != .None {
+		return merr
+	}
+	if merr := register_macros(nodes, &sub, 0); merr != .None {
+		return merr
+	}
 	return render_nodes(sb, root, ctx, &sub)
 }
 
 
-render_output :: proc(sb: ^strings.Builder, expr: string, ctx: ^Warp) {
-	e := eval(expr, ctx)
+render_output :: proc(sb: ^strings.Builder, expr: string, ctx: ^Warp, rc: ^Render_Ctx) {
+	e := eval(expr, ctx, rc)
 	s := to_text(e.val)
 	if e.safe {
 		strings.write_string(sb, s)
@@ -91,7 +102,7 @@ render_output :: proc(sb: ^strings.Builder, expr: string, ctx: ^Warp) {
 }
 
 render_for :: proc(sb: ^strings.Builder, n: Node, ctx: ^Warp, rc: ^Render_Ctx) -> Loom_Error {
-	v := eval(n.iter, ctx).val
+	v := eval(n.iter, ctx, rc).val
 	arr, ok := v.([]Value)
 	if !ok || len(arr) == 0 {
 		return render_nodes(sb, n.alt, ctx, rc) // empty -> the {% else %} body

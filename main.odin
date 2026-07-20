@@ -24,6 +24,12 @@ main :: proc() {
 	// methods: GET /pages/form.html seeds a token, POST /submit requires it.
 	gh.rune(&app, gh.logger)
 	gh.rune(&app, gh.cors)
+	// Per-client token bucket: bursts pass, sustained excess gets 429 +
+	// Retry-After. Tuned low here so the demo is easy to trip; the defaults
+	// (10/sec, burst 20) suit ordinary browsing.
+	gh.rate_limit_rps = 5
+	gh.rate_limit_burst = 10
+	gh.rune(&app, gh.rate_limit)
 	gh.rune(&app, gh.csrf)
 
 	// Serve ./docs at /docs — a GET that hands back raw files.

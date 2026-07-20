@@ -54,14 +54,17 @@ slow_clients_dont_stall_fast :: proc(t: ^testing.T) {
 			testing.expectf(t, false, "dial failed: %v", derr)
 			return {}, false
 		}
-		s, _, aerr := net.accept_tcp(listener)
+		s, source, aerr := net.accept_tcp(listener)
 		if aerr != nil {
 			net.close(c)
 			testing.expectf(t, false, "accept failed: %v", aerr)
 			return {}, false
 		}
 		append(clients, c)
-		append(workers, thread.create_and_start_with_poly_data3(app, s, rawptr(nil), gh.handle_worker))
+		append(
+			workers,
+			thread.create_and_start_with_poly_data4(app, s, source, rawptr(nil), gh.handle_worker),
+		)
 		return c, true
 	}
 

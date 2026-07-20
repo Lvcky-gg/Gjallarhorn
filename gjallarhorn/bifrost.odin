@@ -18,6 +18,7 @@ Bifrost :: struct {
 	body:        []u8,              // raw request body
 	body_text:   string,            // body as a string view
 	client:      net.TCP_Socket,
+	remote:      net.Endpoint, // peer address, captured at accept; see client_ip
 	ssl:         rawptr, // TLS session when serving HTTPS; nil for plaintext (GH-054)
 	written:     bool,
 	status:      int,               // final response status, recorded by write_response (for logging)

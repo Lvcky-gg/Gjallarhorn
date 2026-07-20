@@ -324,7 +324,26 @@ gh.rune(&app, auth)
 
 Built-ins: `logger` (one leveled, structured line per request — colorized on a
 TTY, plain RFC3339 when piped), `cors` (permissive CORS + preflight `OPTIONS`
-short-circuit), and `csrf` (see below).
+short-circuit), `csrf` (see below), and `rate_limit`.
+
+**Rate limiting.** `rate_limit` is a per-client token bucket: each client gets
+`rate_limit_burst` tokens refilling at `rate_limit_rps` per second, so bursts
+pass untouched and only sustained excess is refused — with a `429` and a
+`Retry-After` saying when the next token lands. It pairs with the bounded worker
+pool: the pool caps how much work runs at once, this caps how fast one client can
+ask for it.
+
+```odin
+gh.rate_limit_rps   = 20        // sustained requests/second per client (default 10)
+gh.rate_limit_burst = 40        // burst forgiven at once           (default 20)
+gh.rune(&app, gh.rate_limit)
+```
+
+Clients are keyed by the peer address captured at accept. Behind a reverse proxy
+every request would otherwise share the proxy's bucket, so set
+`gh.rate_limit_trust_forwarded = true` to key on `X-Forwarded-For` instead —
+**only** when a trusted proxy sets that header, since clients can forge it. Idle
+buckets are swept periodically so the table can't grow without bound.
 
 ### Sessions, CSRF & Wards
 
@@ -711,8 +730,8 @@ instead of killing the process.
 from the GET route); HTTP keep-alive, chunked transfer decoding, and pipelining;
 a **bounded worker pool** with **graceful SIGTERM/SIGINT drain**; per-request
 panic recovery; cookies and HMAC-signed sessions with server-enforced expiry;
-**CSRF** protection and **Wards** (per-route auth guards) with `login`/`logout`/
-`current_user`; the ORM's full read/write/transaction path with struct hydration
+**CSRF** protection, per-client **rate limiting**, and **Wards** (per-route auth
+guards) with `login`/`logout`/`current_user`; the ORM's full read/write/transaction path with struct hydration
 over `int`/`float`/`bool`/`string`, `time.Time`, `uuid`, `bytea`, `JSONB`, and
 `Maybe(T)` nullables; SCRAM-SHA-256 auth; connection pooling; optional TLS on
 both the DB connection and the HTTP server; template inheritance, includes,

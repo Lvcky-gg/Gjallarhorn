@@ -168,7 +168,7 @@ install_signal_handlers :: proc() {
 // responsive even with no traffic.
 accept_worker :: proc(app: ^App, sock: net.TCP_Socket) {
 	for !sync.atomic_load(&_shutting_down) {
-		client, _, accept_err := net.accept_tcp(sock)
+		client, source, accept_err := net.accept_tcp(sock)
 		if accept_err != nil {
 			#partial switch accept_err {
 			case .Would_Block, .Interrupted:
@@ -178,7 +178,7 @@ accept_worker :: proc(app: ^App, sock: net.TCP_Socket) {
 			}
 			continue
 		}
-		handle_worker(app, client, app.tls_ctx)
+		handle_worker(app, client, source, app.tls_ctx)
 	}
 }
 
@@ -201,7 +201,7 @@ bind_address :: proc(host: string) -> net.Address {
 // own context (and thus its own thread-local temp allocator), so the per-request
 // free_all inside handle_connection only ever reclaims this worker's arena —
 // safe under concurrency.
-handle_worker :: proc(app: ^App, client: net.TCP_Socket, tls_ctx: rawptr) {
+handle_worker :: proc(app: ^App, client: net.TCP_Socket, remote: net.Endpoint, tls_ctx: rawptr) {
 	// An idle/slow socket must not pin a worker forever; the timeout applies to
 	// the TLS handshake below as well as to per-request reads.
 	net.set_option(net.Any_Socket(client), .Receive_Timeout, IDLE_TIMEOUT)
@@ -219,7 +219,7 @@ handle_worker :: proc(app: ^App, client: net.TCP_Socket, tls_ctx: rawptr) {
 		}
 	}
 
-	handle_connection(app, client, ssl)
+	handle_connection(app, client, remote, ssl)
 
 	if ssl != nil {
 		tls_free(ssl)
@@ -262,13 +262,15 @@ IDLE_TIMEOUT :: 15 * time.Second // how long a kept-alive socket may sit idle
 // the connection is reused.
 Conn :: struct {
 	socket: net.TCP_Socket,
+	remote: net.Endpoint, // peer address, for logging / rate limiting
 	ssl:    rawptr, // TLS session for this connection; nil for plaintext (GH-054)
 	buf:    [dynamic]u8,
 }
 
-handle_connection :: proc(app: ^App, client: net.TCP_Socket, ssl: rawptr) {
+handle_connection :: proc(app: ^App, client: net.TCP_Socket, remote: net.Endpoint, ssl: rawptr) {
 	conn := Conn {
 		socket = client,
+		remote = remote,
 		ssl    = ssl,
 		buf    = make([dynamic]u8),
 	}
@@ -403,6 +405,7 @@ read_request :: proc(
 			body        = body,
 			body_text   = string(body),
 			client      = conn.socket,
+			remote      = conn.remote,
 			ssl         = conn.ssl,
 			keep_alive  = keep_alive_wanted(version, req_headers),
 		}
@@ -446,6 +449,7 @@ read_request :: proc(
 		body        = body,
 		body_text   = string(body),
 		client      = conn.socket,
+		remote      = conn.remote,
 		ssl         = conn.ssl,
 		keep_alive  = keep_alive_wanted(version, req_headers),
 	}

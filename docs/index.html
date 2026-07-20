@@ -228,9 +228,10 @@ upload_handler :: proc(b: ^gh.Bifrost) {
         way <code>cors</code> answers a preflight <code>OPTIONS</code> directly or
         <code>csrf</code> rejects a tokenless POST with a 403.
       </p>
-      <pre class="code">gh.rune(&amp;app, gh.logger)   <span class="c">// one structured, colored line per request</span>
-gh.rune(&amp;app, gh.cors)     <span class="c">// CORS headers + preflight short-circuit</span>
-gh.rune(&amp;app, gh.csrf)     <span class="c">// synchronizer-token CSRF, session-backed</span>
+      <pre class="code">gh.rune(&amp;app, gh.logger)     <span class="c">// one structured, colored line per request</span>
+gh.rune(&amp;app, gh.cors)       <span class="c">// CORS headers + preflight short-circuit</span>
+gh.rune(&amp;app, gh.csrf)       <span class="c">// synchronizer-token CSRF, session-backed</span>
+gh.rune(&amp;app, gh.rate_limit) <span class="c">// per-client token bucket -&gt; 429 + Retry-After</span>
 
 cors :: proc(b: ^gh.Bifrost, next: gh.Next) {
     gh.set_header(b, <span class="s">"Access-Control-Allow-Origin"</span>, <span class="s">"*"</span>)
@@ -240,6 +241,20 @@ cors :: proc(b: ^gh.Bifrost, next: gh.Next) {
     }
     next(b)  <span class="c">// run the rest of the onion</span>
 }</pre>
+
+      <p class="prose">
+        <code>rate_limit</code> hands each client a bucket of
+        <code>rate_limit_burst</code> tokens that refills at
+        <code>rate_limit_rps</code> per second: bursts pass untouched, and only
+        sustained excess is refused — with a <code>429</code> and a
+        <code>Retry-After</code> saying when the next token lands. It pairs with
+        the bounded worker pool: the pool caps how much work runs at once, this
+        caps how fast any one client may ask for it. Clients are keyed by the peer
+        address captured at accept; behind a trusted reverse proxy, set
+        <code>rate_limit_trust_forwarded</code> to key on
+        <code>X-Forwarded-For</code> instead (it's forgeable, so only with a proxy
+        you trust). Idle buckets are swept, so the table can't grow unbounded.
+      </p>
     </section>
 
     <!-- SECURITY -->
@@ -271,6 +286,7 @@ require_login :: proc(b: ^gh.Bifrost) -> bool {
         <div class="verb"><b>sessions</b><span>signed cookie</span><em>HMAC-SHA256, server-enforced expiry, Secure over TLS</em></div>
         <div class="verb"><b>csrf</b><span>synchronizer token</span><em>per-session token in header or form field, constant-time compare</em></div>
         <div class="verb"><b>wards</b><span>route guards</span><em>proc(b) -&gt; bool run before the handler; 401/403 on deny</em></div>
+        <div class="verb"><b>rate_limit</b><span>token bucket</span><em>per-client burst + refill; 429 with Retry-After on excess</em></div>
         <div class="verb"><b>smuggling</b><span>framing</span><em>reject dup / CL+TE headers &amp; non-canonical lengths; strict chunked</em></div>
         <div class="verb"><b>CRLF</b><span>response</span><em>header/cookie writes strip CR/LF; templates escape by default</em></div>
       </div>
@@ -475,6 +491,7 @@ odin build cli -out:gh           <span class="c"># build the CLI yourself</span>
 
     gh.rune(&amp;app, gh.logger)             <span class="c">// onion order</span>
     gh.rune(&amp;app, gh.cors)
+    gh.rune(&amp;app, gh.rate_limit)         <span class="c">// 429s abusive clients</span>
     gh.rune(&amp;app, gh.csrf)
     gh.hail(&amp;app, <span class="s">"/docs"</span>, <span class="s">"./docs"</span>)     <span class="c">// serve files</span>
 

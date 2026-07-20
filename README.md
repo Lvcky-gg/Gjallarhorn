@@ -189,8 +189,18 @@ Method verbs register routes; `:name` segments capture into params.
 gh.get(&app, "/sample/:id", get_handler)
 gh.post(&app, "/sample", create_handler)
 gh.put(&app, "/sample/:id", update_handler)
+gh.patch(&app, "/sample/:id", patch_handler)
 gh.delete(&app, "/sample/:id", delete_handler)
+
+// Rarely needed: HEAD is answered from the matching GET route with the body
+// dropped (same headers, same Content-Length), and the `cors` rune already
+// short-circuits preflight OPTIONS. Register these only for custom behaviour.
+gh.head(&app, "/sample/:id", head_handler)
+gh.options(&app, "/sample", options_handler)
 ```
+
+A route takes an optional 4th argument — a **Ward** (auth guard); see
+[Sessions, CSRF & Wards](#sessions-csrf--wards) below.
 
 Inside a handler, the `Bifrost` is your request *and* response:
 
@@ -236,10 +246,33 @@ login :: proc(b: ^gh.Bifrost) {
 }
 ```
 
+**File uploads.** A `multipart/form-data` body works through the same `form`
+call — its text fields land in that map (so CSRF tokens and ordinary inputs
+behave identically under either encoding) — while the file parts come back from
+`files` / `upload`:
+
+```odin
+upload :: proc(b: ^gh.Bifrost) {
+    title := gh.form(b)["title"]          // text part, same as urlencoded
+    f, ok := gh.upload(b, "file")         // file part, by field name
+    if !ok {
+        gh.text(b, 400, "expected a `file` part")
+        return
+    }
+    // f.filename, f.content_type, f.data ([]u8 — exact bytes)
+    os.write_entire_file_from_string(f.filename, string(f.data))
+}
+```
+
+`files(b)` returns every uploaded part as `map[string]Upload`. The body is parsed
+once and cached on the Bifrost, so `form` and `upload` can both be called freely.
+
 The raw body is also on the Bifrost as `b.body` (`[]u8`) and `b.body_text`
 (`string`) if you need to decode it yourself. Bodies are framed by
-`Content-Length` and capped at `Config.max_body` (default 1 MiB), beyond which the
-server returns `413` before your handler runs.
+`Content-Length` **or** `Transfer-Encoding: chunked`, and capped at
+`Config.max_body` (default 1 MiB), beyond which the server returns `413` before
+your handler runs. Ambiguous framing (both headers, duplicates, or a
+non-canonical length) is rejected as a request-smuggling attempt.
 
 **Writing the response.** `text`, `json`, and `html` set the status, content
 type, and body in one call; `set_header` adds a response header; `not_found`
@@ -289,8 +322,52 @@ auth :: proc(b: ^gh.Bifrost, next: gh.Next) {
 gh.rune(&app, auth)
 ```
 
-Built-ins: `logger` (one line per request) and `cors` (permissive CORS +
-preflight `OPTIONS` short-circuit).
+Built-ins: `logger` (one leveled, structured line per request — colorized on a
+TTY, plain RFC3339 when piped), `cors` (permissive CORS + preflight `OPTIONS`
+short-circuit), and `csrf` (see below).
+
+### Sessions, CSRF & Wards
+
+The session is a small `string → string` map that rides in a cookie the client
+holds — the server keeps no state. An **HMAC-SHA256** tag over the payload (keyed
+by `Config.secret`) makes it unforgeable, and the expiry is signed *inside* the
+tag, so a client can't extend its own session by editing the cookie. `Secure` is
+set automatically over TLS.
+
+```odin
+gh.session_set(b, "theme", "dark")
+theme, ok := gh.session_get(b, "theme")
+gh.session_delete(b, "theme")
+gh.session_clear(b)                       // and expire the cookie
+```
+
+**Login** is a thin layer on that: `login` records a user id in the signed
+session, and a **Ward** gates routes on it. A Ward is just
+`proc(b: ^Bifrost) -> bool` — return `true` to admit; on `false` the handler is
+skipped (write your own status, or dispatch falls back to `401`).
+
+```odin
+gh.login(b, "user-42")                    // after you verify a password/OTP
+uid, ok := gh.current_user(b)
+gh.logout(b)
+
+// Built-in ward; or write your own for roles/ownership.
+gh.get(&app, "/account", account_handler, gh.require_login)
+```
+
+**CSRF** is a session-backed synchronizer token, registered as a rune. Safe
+methods (GET/HEAD/OPTIONS) seed a token; unsafe ones must echo it back in the
+`X-CSRF-Token` header or a `csrf_token` form field (compared in constant time),
+else `403`.
+
+```odin
+gh.rune(&app, gh.csrf)
+token := gh.csrf_token(b)   // embed in a form or hand to fetch()
+```
+
+> **Set a real secret.** `Config.secret` signs sessions and CSRF tokens. A
+> release build **refuses to start** on an empty or default secret; a `-debug`
+> build warns and continues.
 
 ### Mímir — the ORM
 
@@ -335,7 +412,35 @@ users := gh.scan(rows, User)            // []User
 one, found := gh.scan_one(rows, User)   // (User, bool)
 ```
 
-Supported field types: the int family, `f32`/`f64`, `bool`, and `string`.
+**Supported field types.** Each maps to a Postgres column both directions — the
+DDL Mímir carves, the bound parameter it writes, and the value `scan` hydrates
+back:
+
+| Odin type | Postgres column |
+|---|---|
+| int family (`int`, `i8`…`i64`, `u8`…`u64`) | `BIGINT` |
+| `f32` / `f64` | `DOUBLE PRECISION` |
+| `bool` | `BOOLEAN` |
+| `string` | `TEXT` |
+| `time.Time` | `TIMESTAMPTZ` |
+| `[]u8` | `BYTEA` |
+| `gh.Uuid` (alias of `core:encoding/uuid.Identifier`) | `UUID` |
+| `gh.Json` (raw JSON text) | `JSONB` |
+
+Wrap any of them in **`Maybe(T)`** to make the column nullable: a SQL `NULL`
+hydrates as `None` and a value as `Some(v)`, so `NULL` is never conflated with a
+zero or empty value — and on the write side `None` binds as a real `NULL`.
+
+```odin
+Event :: struct {
+    id:   int              `db:"id,pk,auto"`,
+    at:   time.Time        `db:"at"`,      // TIMESTAMPTZ
+    ref:  gh.Uuid          `db:"ref"`,     // UUID
+    blob: []u8             `db:"blob"`,    // BYTEA
+    meta: gh.Json          `db:"meta"`,    // JSONB
+    note: Maybe(string)    `db:"note"`,    // nullable TEXT
+}
+```
 
 **Writes** use the same `query` verb with `offer`/`amend`/`forget`, or `exec`
 when you don't need the returned rows:
@@ -579,39 +684,57 @@ matched before static mounts.
 
 ## Lifecycle
 
-A request crosses Bifrost in order: the socket loop in `server.odin` parses the
-request line and builds a `Bifrost`, the rune chain runs outermost-first via
-`next`, and when the chain is exhausted `dispatch_route` matches a route (or a
-static/template mount) and calls the handler, which writes the response back
-through the same Bifrost.
+A request crosses Bifrost in order: a worker in `server.odin` frames the request
+and builds a `Bifrost`, the rune chain runs outermost-first via `next`, and when
+the chain is exhausted `dispatch_route` matches a route (or a static/template
+mount), runs its Ward if it has one, and calls the handler — which writes the
+response back through the same Bifrost.
+
+**Concurrency.** `run()` starts a fixed pool of `Config.workers` threads (default
+`256`), each accepting on the shared listening socket, so a connection flood
+can't spawn unbounded threads. Excess connections wait in the kernel backlog.
+Each worker owns its own temp allocator, reset per request.
+
+**Shutdown.** `SIGINT`/`SIGTERM` flip a shutdown flag: workers stop accepting,
+finish the request in flight, and decline to read another on a kept-alive
+connection; `run()` joins them, closes the DB pool, and returns cleanly.
+`SIGPIPE` is ignored, so a client hanging up mid-response returns an error
+instead of killing the process.
 
 ---
 
 ## Status & limitations
 
-**Working today:** request headers, bodies (JSON + form) and query params; HTTP
-keep-alive; one-thread-per-connection concurrency; configurable bind address;
-per-request panic recovery; cookies and signed-cookie sessions; the ORM's full
-read/write/transaction path with struct hydration; SCRAM-SHA-256 auth; connection
-pooling; optional TLS on both the DB connection and the HTTP server; template
-inheritance, includes, whitespace control, the compiled-node cache, and direct
-struct rendering.
+**Working today:** request headers, query params, and bodies in all three shapes
+(JSON, url-encoded, and `multipart/form-data` file uploads); every method verb
+(`get`/`post`/`put`/`patch`/`delete`, plus `head`/`options`, with HEAD answered
+from the GET route); HTTP keep-alive, chunked transfer decoding, and pipelining;
+a **bounded worker pool** with **graceful SIGTERM/SIGINT drain**; per-request
+panic recovery; cookies and HMAC-signed sessions with server-enforced expiry;
+**CSRF** protection and **Wards** (per-route auth guards) with `login`/`logout`/
+`current_user`; the ORM's full read/write/transaction path with struct hydration
+over `int`/`float`/`bool`/`string`, `time.Time`, `uuid`, `bytea`, `JSONB`, and
+`Maybe(T)` nullables; SCRAM-SHA-256 auth; connection pooling; optional TLS on
+both the DB connection and the HTTP server; template inheritance, includes,
+whitespace control, the compiled-node cache, and direct struct rendering;
+leveled/structured logging; a scaffolding CLI; and CI that tests and publishes to
+the AUR on every push to `main`.
 
 **Known gaps**, in rough order of impact:
 
 - **Postgres-only in practice.** MySQL and SQLite generate DDL but have no live
   driver yet, so `query`/`exec` only run against Postgres.
-- **No auth-guard middleware or CSRF protection** yet — the `.ward` in the sample
-  is still a TODO. Sessions and cookies exist to build these on.
+- **Keep-alive holds a worker.** Concurrency is bounded (`Config.workers`,
+  default 256) rather than unbounded, but a slow client still occupies its worker
+  for the connection's life — size the pool accordingly.
 - **Templates have no `{% macro %}`.** Inheritance, includes, and whitespace
   control are in; macros are not.
 - **TLS is opt-in and depends on system OpenSSL** (by design — a default build has
   no TLS and no libssl). `.Verify_Full` trusts only the system CA bundle, and
   certs are loaded once at boot.
-- **No structured logging or CI** yet (the built-in `logger` writes one plain
-  line per request).
+- **Multipart filenames containing `;`** split early — the part-header parser is
+  deliberately simpler than a full RFC 2045 quoted-string parser.
 
-A full backlog with fix guides lives alongside this project (`backlog.md`).
 Contributions toward any of the above are the most useful place to start.
 
 ---

@@ -305,6 +305,7 @@ code {
 .m.get  { color: #7fe3c0; background: rgba(95,227,192,0.12); }
 .m.post { color: #9db8ff; background: rgba(106,160,255,0.14); }
 .m.put  { color: #e7c986; background: rgba(231,201,134,0.14); }
+.m.patch{ color: #c9a9ff; background: rgba(180,150,255,0.14); }
 .m.del  { color: #ff9ba6; background: rgba(255,120,135,0.12); }
 .hint { margin-top: 14px; color: var(--frost-mute); font-size: 0.9rem; }
 

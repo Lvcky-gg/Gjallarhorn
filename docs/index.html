@@ -15,12 +15,12 @@
       <a class="brand" href="#top">ᚷ Gjallarhorn</a>
       <div class="links">
         <a href="#overview">Overview</a>
-        <a href="#lifecycle">Lifecycle</a>
         <a href="#routing">Routing</a>
-        <a href="#runes">Runes</a>
+        <a href="#security">Security</a>
         <a href="#mimir">Mímir</a>
         <a href="#loom">Loom</a>
-        <a href="#quickstart">Quickstart</a>
+        <a href="#cli">CLI</a>
+        <a href="#install">Install</a>
         <a href="https://github.com/Lvcky-gg/Gjallarhorn">GitHub ↗</a>
       </div>
     </nav>
@@ -30,13 +30,15 @@
       <h1>Heimdall is listening.</h1>
       <p class="lede">
         Gjallarhorn is the horn Heimdall sounds at the gates of Ásgarð. Here it is
-        a small, honest web framework — an HTTP server, a router, an onion of
-        middleware, and an ORM that speaks PostgreSQL on a hand-rolled wire
-        protocol. No libpq, no dependencies. Just structs, runes, and the well of
-        memory.
+        a small, honest web framework — an HTTP/1.1 server, a router, an onion of
+        middleware, signed-cookie sessions with CSRF and route guards, file
+        uploads, an ORM that speaks PostgreSQL on a hand-rolled wire protocol, and
+        a Jinja-style template engine. No libpq, no dependencies — and a
+        <code>nest</code>-style CLI to scaffold it all. Just structs, runes, and
+        the well of memory.
       </p>
       <div class="hero-cta">
-        <a class="btn primary" href="#quickstart">Sound the horn →</a>
+        <a class="btn primary" href="#install">Install →</a>
         <a class="btn ghost" href="https://github.com/Lvcky-gg/Gjallarhorn">View on GitHub ↗</a>
       </div>
     </div>
@@ -63,30 +65,41 @@
         <article class="card">
           <div class="rune">ᚺ</div>
           <h3>Heimdall, the server</h3>
-          <p>A blocking accept loop on <code>core:net</code>. It parses the
-          request line, bounds the read buffer, and hands a fresh Bifrost to the
-          rune chain. <code>server.odin</code></p>
+          <p>An HTTP/1.1 server on <code>core:net</code> with a bounded worker
+          pool, keep-alive, chunked bodies, and graceful shutdown. Request-smuggling
+          and CRLF defenses baked in. <code>server.odin</code></p>
         </article>
         <article class="card">
           <div class="rune">ᛒ</div>
           <h3>Bifrost, the bridge</h3>
-          <p>The request/response object. Path params, response headers, and the
-          <code>text</code> / <code>json</code> helpers a handler calls. Named so
-          it never shadows Odin's <code>context</code>. <code>bifrost.odin</code></p>
+          <p>The request/response object. Path/query params, response headers,
+          cookies, and the <code>text</code> / <code>json</code> helpers a handler
+          calls. Named so it never shadows Odin's <code>context</code>.
+          <code>bifrost.odin</code></p>
         </article>
         <article class="card">
           <div class="rune">ᚱ</div>
           <h3>Runes, the middleware</h3>
           <p>Each rune wraps the rest of the pipeline, onion-style. With no
           closures in Odin, the remaining chain is threaded through the Bifrost
-          itself. <code>middleware.odin</code></p>
+          itself. <code>logger</code>, <code>cors</code>, <code>csrf</code>.
+          <code>middleware.odin</code></p>
+        </article>
+        <article class="card">
+          <div class="rune">ᚨ</div>
+          <h3>Sessions &amp; guards</h3>
+          <p>HMAC-signed cookie sessions with server-enforced expiry, a CSRF
+          synchronizer token, and <strong>Wards</strong> — per-route auth guards.
+          Login/logout out of the box. <code>session.odin</code> ·
+          <code>auth.odin</code></p>
         </article>
         <article class="card">
           <div class="rune">ᛗ</div>
           <h3>Mímir, the well</h3>
           <p>The ORM. Your <code>db:</code>-tagged structs are a shape; Mímir
-          remembers them as rows and migrates them at startup.
-          <code>mimir.odin</code> · <code>postgres.odin</code></p>
+          remembers them as rows and migrates them at startup — over a from-scratch
+          Postgres wire client with SCRAM auth. <code>mimir.odin</code> ·
+          <code>postgres.odin</code></p>
         </article>
         <article class="card">
           <div class="rune">ᛚ</div>
@@ -94,6 +107,14 @@
           <p>The templating engine. A template is the warp strung on the loom;
           <code>weave</code> runs your data through it as the weft to produce
           HTML. A Jinja dialect, HTML-escaped by default. <code>loom.odin</code></p>
+        </article>
+        <article class="card">
+          <div class="rune">ᚷ</div>
+          <h3>The gjallarhorn CLI</h3>
+          <p>Scaffolding in the spirit of <code>nest</code>: <code>gjallarhorn
+          new</code> bootstraps a runnable app (vendoring the framework), and
+          <code>generate resource</code> writes a full CRUD trio. On the AUR.
+          <code>cli/</code></p>
         </article>
       </div>
     </section>
@@ -109,9 +130,10 @@
           <span class="step">1</span>
           <div>
             <h3>Heimdall accepts</h3>
-            <p>The accept loop reads up to <code>MAX_REQUEST</code> bytes, parses
-            <code>METHOD&nbsp;SP&nbsp;TARGET&nbsp;SP&nbsp;HTTP/1.1</code>, strips
-            the query string, and builds a Bifrost.</p>
+            <p>A fixed pool of worker threads accepts on the shared socket, so
+            concurrency is bounded, not unbounded. Each frames the request
+            (Content-Length or chunked), rejecting ambiguous framing before it
+            can smuggle.</p>
           </div>
         </li>
         <li>
@@ -119,8 +141,8 @@
           <div>
             <h3>The runes wrap</h3>
             <p><code>next(&amp;b)</code> advances an index through the registered
-            middleware — <code>logger</code>, then <code>cors</code> — each free
-            to act before and after the call downstream.</p>
+            middleware — <code>logger</code>, <code>cors</code>, <code>csrf</code>
+            — each free to act before and after the call downstream.</p>
           </div>
         </li>
         <li>
@@ -128,17 +150,19 @@
           <div>
             <h3>Dispatch matches</h3>
             <p>Method first, then a segment-wise path match. <code>:name</code>
-            segments capture into <code>params</code>. No route? Static mounts are
-            tried for GET, else a 404.</p>
+            segments capture into <code>params</code>. A <strong>Ward</strong> may
+            guard the route; HEAD falls back to the GET handler with the body
+            dropped.</p>
           </div>
         </li>
         <li>
           <span class="step">4</span>
           <div>
             <h3>The handler answers</h3>
-            <p>Your procedure reads params, perhaps draws a <code>well</code>, and
-            writes back with <code>text</code> or <code>json</code>. The response
-            crosses the Bifrost and the socket closes.</p>
+            <p>Your procedure reads params/JSON/form, perhaps draws a
+            <code>well</code>, and writes back with <code>text</code>,
+            <code>json</code>, or a woven template. On SIGTERM the pool drains
+            in-flight requests and exits cleanly.</p>
           </div>
         </li>
       </ol>
@@ -148,35 +172,45 @@
     <section id="routing">
       <div class="section-head">
         <span class="kicker">Free procedures, explicit app</span>
-        <h2>Routing</h2>
+        <h2>Routing &amp; request bodies</h2>
       </div>
       <p class="prose">
         Handlers are plain procedures of type <code>proc(b: ^Bifrost)</code> —
         Odin has no methods or closures, so the app is always passed by pointer.
-        Register routes with the method verbs; literal paths should be declared
-        before <code>:param</code> patterns so a capture never swallows a fixed
-        segment.
+        Register routes with the method verbs (<code>get</code>, <code>post</code>,
+        <code>put</code>, <code>patch</code>, <code>delete</code>, plus
+        <code>head</code>/<code>options</code>). Literal paths go before
+        <code>:param</code> patterns so a capture never swallows a fixed segment.
       </p>
       <pre class="code"><span class="c">// Literal routes before the :id pattern, else ":id" captures "schema".</span>
 gh.get(app, <span class="s">"/sample/schema"</span>, schema_handler)
 gh.get(app, <span class="s">"/sample/:id"</span>, get_handler)
 
-<span class="c">// CRUD against Postgres via Mímir. Method is matched before path.</span>
-gh.post(app, <span class="s">"/sample/:name"</span>, create_handler)      <span class="c">// create</span>
-gh.put(app, <span class="s">"/sample/:id/:name"</span>, update_handler)   <span class="c">// update</span>
-gh.delete(app, <span class="s">"/sample/:id"</span>, delete_handler)      <span class="c">// delete</span></pre>
+<span class="c">// CRUD: create/update take a JSON body; only the id rides in the path.</span>
+gh.post(app, <span class="s">"/sample"</span>, create_handler)        <span class="c">// create</span>
+gh.put(app, <span class="s">"/sample/:id"</span>, update_handler)      <span class="c">// update</span>
+gh.delete(app, <span class="s">"/sample/:id"</span>, delete_handler)   <span class="c">// delete</span>
 
-      <div class="prose">
-        <p>Inside a handler, params come back idiomatically as
-        <code>(value, ok)</code>:</p>
-      </div>
-      <pre class="code">get_handler :: proc(b: ^gh.Bifrost) {
-    id, ok := gh.param_int(b, <span class="s">"id"</span>)
-    <span class="k">if</span> !ok {
-        gh.text(b, <span class="n">400</span>, <span class="s">"id must be an integer"</span>)
-        <span class="k">return</span>
+<span class="c">// Ward as an optional 4th arg — the handler runs only if it returns true.</span>
+gh.get(app, <span class="s">"/account"</span>, account_handler, gh.require_login)</pre>
+
+      <p class="prose">
+        Read the body the way that fits: <code>bind_json</code> unmarshals into a
+        struct, <code>form</code> decodes url-encoded <em>and</em> multipart fields
+        (so CSRF tokens work under either), and <code>files</code> /
+        <code>upload</code> hand back uploaded files, byte-for-byte.
+      </p>
+      <pre class="code">create_handler :: proc(b: ^gh.Bifrost) {
+    payload: Sample
+    <span class="k">if</span> !gh.bind_json(b, &amp;payload) { <span class="k">return</span> }  <span class="c">// wrote 400 already</span>
+    <span class="c">// ...</span>
+}
+
+upload_handler :: proc(b: ^gh.Bifrost) {
+    title := gh.form(b)[<span class="s">"title"</span>]              <span class="c">// text field</span>
+    <span class="k">if</span> f, ok := gh.upload(b, <span class="s">"file"</span>); ok {     <span class="c">// uploaded file</span>
+        gh.json(b, <span class="n">200</span>, struct{ name: string, bytes: int }{f.filename, len(f.data)})
     }
-    gh.json(b, <span class="n">200</span>, Sample{id = id, name = <span class="s">"thing"</span>})
 }</pre>
     </section>
 
@@ -191,10 +225,12 @@ gh.delete(app, <span class="s">"/sample/:id"</span>, delete_handler)      <span 
         <code>rune</code>; they run in registration order, each wrapping
         everything after it. Calling <code>next(b)</code> runs the next layer —
         or, at the end, dispatches the route. Skip the call to short-circuit, the
-        way <code>cors</code> answers a preflight <code>OPTIONS</code> directly.
+        way <code>cors</code> answers a preflight <code>OPTIONS</code> directly or
+        <code>csrf</code> rejects a tokenless POST with a 403.
       </p>
-      <pre class="code">gh.rune(&amp;app, gh.logger)   <span class="c">// → GET /sample/7</span>
+      <pre class="code">gh.rune(&amp;app, gh.logger)   <span class="c">// one structured, colored line per request</span>
 gh.rune(&amp;app, gh.cors)     <span class="c">// CORS headers + preflight short-circuit</span>
+gh.rune(&amp;app, gh.csrf)     <span class="c">// synchronizer-token CSRF, session-backed</span>
 
 cors :: proc(b: ^gh.Bifrost, next: gh.Next) {
     gh.set_header(b, <span class="s">"Access-Control-Allow-Origin"</span>, <span class="s">"*"</span>)
@@ -206,8 +242,42 @@ cors :: proc(b: ^gh.Bifrost, next: gh.Next) {
 }</pre>
     </section>
 
+    <!-- SECURITY -->
+    <section id="security">
+      <div class="section-head">
+        <span class="kicker">Fail closed, sign everything</span>
+        <h2>Sessions, CSRF &amp; guards</h2>
+      </div>
+      <p class="prose">
+        The session is a small string map that rides in a cookie the client holds
+        — the server keeps no state. An <strong>HMAC-SHA256</strong> tag over the
+        payload (keyed by <code>Config.secret</code>) makes it unforgeable, and the
+        expiry is signed <em>inside</em> the tag, so a client can't extend its own
+        session. In a release build, <code>run()</code> refuses to start on an
+        empty or default secret.
+      </p>
+      <pre class="code"><span class="c">// Log a user in after you verify their credentials.</span>
+gh.login(b, user_id)                 <span class="c">// records the id in the signed session</span>
+uid, ok := gh.current_user(b)        <span class="c">// read it back later</span>
+gh.logout(b)                         <span class="c">// drop just the auth key</span>
+
+<span class="c">// A Ward is proc(b) -> bool. Attach any as a route's 4th arg.</span>
+require_login :: proc(b: ^gh.Bifrost) -> bool {
+    <span class="k">if</span> _, ok := gh.current_user(b); ok { <span class="k">return</span> <span class="k">true</span> }
+    gh.text(b, <span class="n">401</span>, <span class="s">"login required"</span>)
+    <span class="k">return</span> <span class="k">false</span>
+}</pre>
+      <div class="verb-table">
+        <div class="verb"><b>sessions</b><span>signed cookie</span><em>HMAC-SHA256, server-enforced expiry, Secure over TLS</em></div>
+        <div class="verb"><b>csrf</b><span>synchronizer token</span><em>per-session token in header or form field, constant-time compare</em></div>
+        <div class="verb"><b>wards</b><span>route guards</span><em>proc(b) -&gt; bool run before the handler; 401/403 on deny</em></div>
+        <div class="verb"><b>smuggling</b><span>framing</span><em>reject dup / CL+TE headers &amp; non-canonical lengths; strict chunked</em></div>
+        <div class="verb"><b>CRLF</b><span>response</span><em>header/cookie writes strip CR/LF; templates escape by default</em></div>
+      </div>
+    </section>
+
     <!-- MIMIR -->
-    <section id="mimir">
+    <section id="mimir" class="alt">
       <div class="section-head">
         <span class="kicker">Óðinn gave an eye for a single draught</span>
         <h2>Mímir — the ORM and the well of memory</h2>
@@ -216,20 +286,22 @@ cors :: proc(b: ^gh.Bifrost, next: gh.Next) {
         Mímir guards the well beneath Yggdrasil whose water is memory. Here your
         structs describe a shape and Mímir remembers it as rows. <code>db:</code>
         struct tags drive everything; you never write a <code>CREATE TABLE</code>.
-        The well speaks a dialect (Postgres, MySQL, or SQLite) and — crucially —
-        <strong>values never reach the SQL string</strong>. Every value is a bound
-        parameter. That is the injection checkpoint, held end to end through the
-        hand-rolled Postgres wire client.
+        And — crucially — <strong>values never reach the SQL string</strong>. Every
+        value is a bound parameter, held end to end through the hand-rolled
+        Postgres wire client (SCRAM-SHA-256 auth, optional TLS).
       </p>
 
-      <pre class="code"><span class="c">// The "M" in MVC. Tags: column name, then flags.</span>
-Sample :: struct {
-    id:   int    `db:<span class="s">"id,pk,auto"</span>`,   <span class="c">// auto primary key</span>
-    name: string `db:<span class="s">"name,notnull"</span>`, <span class="c">// required text</span>
+      <pre class="code"><span class="c">// Rich column types map straight from Odin types.</span>
+Event :: struct {
+    id:      int         `db:<span class="s">"id,pk,auto"</span>`,       <span class="c">// BIGSERIAL PK</span>
+    name:    string      `db:<span class="s">"name,notnull"</span>`,     <span class="c">// TEXT</span>
+    at:      time.Time    `db:<span class="s">"at"</span>`,               <span class="c">// TIMESTAMPTZ</span>
+    ref:     gh.Uuid      `db:<span class="s">"ref"</span>`,              <span class="c">// UUID</span>
+    blob:    []u8         `db:<span class="s">"blob"</span>`,             <span class="c">// BYTEA</span>
+    meta:    gh.Json      `db:<span class="s">"meta"</span>`,             <span class="c">// JSONB</span>
+    note:    Maybe(string) `db:<span class="s">"note"</span>`,            <span class="c">// nullable — NULL is None, not ""</span>
 }
-
-<span class="c">// Hand Mímir the model once; migrate() carves its table at run().</span>
-gh.remember(app, Sample)</pre>
+gh.remember(app, Event)   <span class="c">// migrate() carves + alters the table at run()</span></pre>
 
       <div class="verb-table">
         <div class="verb"><b>carve</b><span>CREATE TABLE</span><em>carve a struct's shape into the well</em></div>
@@ -240,20 +312,19 @@ gh.remember(app, Sample)</pre>
       </div>
 
       <p class="prose">
-        Building procs need only the dialect; <code>exec</code> / <code>query</code>
-        reach through the app's live connection. A handler draws its well straight
-        from the Bifrost:
+        A handler draws its well straight from the Bifrost, then scans rows back
+        into typed structs — <code>Maybe(T)</code> fields carry a real SQL NULL as
+        <code>None</code>, never conflated with an empty value:
       </p>
-      <pre class="code">create_handler :: proc(b: ^gh.Bifrost) {
-    name, _ := gh.param(b, <span class="s">"name"</span>)
+      <pre class="code">get_handler :: proc(b: ^gh.Bifrost) {
+    id, _ := gh.param_int(b, <span class="s">"id"</span>)
     w := gh.well(b)
-    rows, ok := gh.query(w, gh.offer(w, Sample{name = name}))
-    <span class="k">if</span> !ok {
-        gh.text(b, <span class="n">503</span>, <span class="s">"database unavailable"</span>)
-        <span class="k">return</span>
-    }
-    id, _ := strconv.parse_int(rows.rows[<span class="n">0</span>][<span class="n">0</span>])  <span class="c">// the RETURNING id</span>
-    gh.json(b, <span class="n">201</span>, Sample{id = id, name = name})
+    q := gh.recall(w, Event); gh.whose(&amp;q, <span class="s">"id = ?"</span>, id); gh.limit(&amp;q, <span class="n">1</span>)
+    rows, ok := gh.query(w, gh.sql(&amp;q))
+    <span class="k">if</span> !ok { gh.text(b, <span class="n">503</span>, <span class="s">"database unavailable"</span>); <span class="k">return</span> }
+    <span class="k">if</span> row, found := gh.scan_one(rows, Event); found {
+        gh.json(b, <span class="n">200</span>, row)
+    } <span class="k">else</span> { gh.not_found(b) }
 }</pre>
 
       <div class="note">
@@ -267,7 +338,7 @@ gh.remember(app, Sample)</pre>
     </section>
 
     <!-- STATIC -->
-    <section id="static" class="alt">
+    <section id="static">
       <div class="section-head">
         <span class="kicker">Files, served safely</span>
         <h2>Static mounts</h2>
@@ -279,12 +350,12 @@ gh.remember(app, Sample)</pre>
         cleaned, and must stay inside the mount root, or it's a 403. This very
         page is served that way.
       </p>
-      <pre class="code"><span class="c">// Serve ./public at /static — this page lives here.</span>
-gh.hail(&amp;app, <span class="s">"/static"</span>, <span class="s">"./public"</span>)</pre>
+      <pre class="code"><span class="c">// Serve ./docs at /docs — this page lives here.</span>
+gh.hail(&amp;app, <span class="s">"/docs"</span>, <span class="s">"./docs"</span>)</pre>
     </section>
 
     <!-- LOOM -->
-    <section id="loom">
+    <section id="loom" class="alt">
       <div class="section-head">
         <span class="kicker">The Norns weave the threads of fate</span>
         <h2>Loom — the templating engine</h2>
@@ -293,9 +364,11 @@ gh.hail(&amp;app, <span class="s">"/static"</span>, <span class="s">"./public"</
         At the well of Urðr the Norns weave the threads of fate; so here a
         template is the <strong>warp</strong> already strung on the loom, and
         <code>weave</code> runs the <strong>weft</strong> of your data through it
-        to produce the finished cloth — HTML. The dialect is Jinja's, pared to its
-        load-bearing parts: output an expression, pipe it through filters, branch
-        with <code>if</code>, and iterate with <code>for</code>.
+        to produce the finished cloth — HTML. The dialect is Jinja's: output an
+        expression, pipe it through filters, branch with <code>if</code>, iterate
+        with <code>for</code>, and compose with <code>extends</code> /
+        <code>block</code> / <code>include</code>. Parsed templates are cached by
+        path + mtime.
       </p>
 
       <pre class="code"><span class="c">&lt;!-- A template: the warp strung on the loom --&gt;</span>
@@ -311,48 +384,75 @@ gh.hail(&amp;app, <span class="s">"/static"</span>, <span class="s">"./public"</
         <div class="verb"><b>| filter</b><span>pipeline</span><em>upper · lower · capitalize · default · join · length · first · last · safe</em></div>
         <div class="verb"><b>{% if %}</b><span>branch</span><em>if / elif / else / endif</em></div>
         <div class="verb"><b>{% for %}</b><span>iterate</span><em>for x in xs … else (empty case) … endfor, with a loop binding</em></div>
-        <div class="verb"><b>{# … #}</b><span>comment</span><em>dropped before rendering</em></div>
+        <div class="verb"><b>extends</b><span>inheritance</span><em>extends / block / include compose templates</em></div>
       </div>
-
-      <p class="prose">
-        Inside a <code>for</code>, a <code>loop</code> binding carries
-        <code>index</code> / <code>index0</code> / <code>first</code> /
-        <code>last</code> / <code>length</code>, as in Jinja. You thread the
-        context with <code>warp</code> (named values) and <code>list</code>
-        (iterables), then weave:
-      </p>
-      <pre class="code">ctx := gh.warp(
-    {<span class="s">"title"</span>, <span class="s">"Gjallarhorn"</span>},
-    {<span class="s">"user"</span>, gh.warp({<span class="s">"name"</span>, <span class="s">"Heimdallr"</span>})},
-    {<span class="s">"norns"</span>, gh.list(<span class="s">"urd"</span>, <span class="s">"verdandi"</span>, <span class="s">"skuld"</span>)},
-)
-html, _ := gh.weave(src, ctx)     <span class="c">// string in, woven HTML out</span></pre>
-
-      <p class="prose">
-        From a handler, <code>render</code> loads a template file, weaves a context
-        through it, and sends it as HTML. Or mount a whole directory with the
-        four-arg <code>hail</code>: a <code>Provider</code> builds the context fresh
-        per request, so it can read the path, params, or the well.
-      </p>
-      <pre class="code"><span class="c">// One file, one context, sent as text/html.</span>
-gh.render(b, <span class="s">"./templates/hello.html"</span>, ctx)
-
-<span class="c">// Mount ./templates at /pages; GET /pages/x.html weaves templates/x.html.</span>
-gh.hail(&amp;app, <span class="s">"/pages"</span>, <span class="s">"./templates"</span>, provider)</pre>
 
       <div class="note">
         <strong>XSS is the checkpoint.</strong> Every <code>{{ … }}</code> is
-        HTML-escaped unless its filter pipeline ends in <code>| safe</code> (or
-        <code>| escape</code>, which escapes then marks safe). The decision rides
-        alongside each value as it's evaluated, so it's made per output, never
-        globally. Template path is supplied by the handler, not the request — the
-        user-path traversal checkpoint lives over in <code>hail</code>'s static
-        mounts.
+        HTML-escaped unless its filter pipeline ends in <code>| safe</code>. The
+        decision rides alongside each value as it's evaluated, so it's made per
+        output, never globally. Template paths are supplied by the handler, not
+        the request — the user-path traversal checkpoint lives in <code>hail</code>.
       </div>
     </section>
 
+    <!-- CLI -->
+    <section id="cli">
+      <div class="section-head">
+        <span class="kicker">Scaffolding, nest-style</span>
+        <h2>The gjallarhorn CLI</h2>
+      </div>
+      <p class="prose">
+        The <code>gjallarhorn</code> command bootstraps projects and generates
+        code. <code>new</code> scaffolds a runnable app — a minimal
+        <code>main.odin</code>, a <code>docker-compose.yml</code>, and a vendored
+        copy of the framework — so <code>odin run .</code> works immediately.
+        <code>generate resource</code> writes a full CRUD trio
+        (<code>model</code> + <code>controller</code> + <code>routes</code>)
+        mirroring <code>./sample</code>.
+      </p>
+      <pre class="code"><span class="c"># bootstrap a new, runnable app</span>
+gjallarhorn new blog
+cd blog &amp;&amp; odin run .            <span class="c"># -> http://127.0.0.1:8091/hello/world</span>
+
+<span class="c"># add a CRUD resource (alias: g res). Name is plural; the model is singular.</span>
+gjallarhorn generate resource users   <span class="c"># -> users/{model,controller,routes}.odin</span></pre>
+      <p class="prose">
+        The resource's <code>register(app)</code> hands its model to Mímir and
+        wires <code>GET /users/:id</code>, <code>POST /users</code>,
+        <code>PUT /users/:id</code>, and <code>DELETE /users/:id</code>. Drop
+        <code>users.register(&amp;app)</code> into <code>main()</code> and it's live.
+      </p>
+    </section>
+
+    <!-- INSTALL -->
+    <section id="install" class="alt">
+      <div class="section-head">
+        <span class="kicker">Sound the horn</span>
+        <h2>Install</h2>
+      </div>
+      <p class="prose">
+        On Arch Linux, install the <code>gjallarhorn</code> command from the AUR —
+        it ships the framework source, which <code>gjallarhorn new</code> vendors
+        into your project:
+      </p>
+      <pre class="code"><span class="c"># Arch Linux (AUR)</span>
+yay -S gjallarhorn-git           <span class="c"># or: paru -S gjallarhorn-git</span>
+gjallarhorn new blog</pre>
+      <p class="prose">
+        Or work from a checkout — the framework is a single dependency-free Odin
+        package, so there's nothing to fetch but the compiler:
+      </p>
+      <pre class="code"><span class="c"># From a git checkout</span>
+git clone https://github.com/Lvcky-gg/Gjallarhorn.git &amp;&amp; cd Gjallarhorn
+docker compose up -d             <span class="c"># optional: Postgres for the ORM</span>
+odin run .                       <span class="c"># serves the sample on :8091</span>
+odin test ./tests                <span class="c"># the test suite</span>
+odin build cli -out:gh           <span class="c"># build the CLI yourself</span></pre>
+    </section>
+
     <!-- QUICKSTART -->
-    <section id="quickstart" class="alt">
+    <section id="quickstart">
       <div class="section-head">
         <span class="kicker">The whole ceremony</span>
         <h2>Quickstart</h2>
@@ -365,6 +465,7 @@ gh.hail(&amp;app, <span class="s">"/pages"</span>, <span class="s">"./templates"
       <pre class="code">main :: proc() {
     app := gh.new(gh.Config{
         port    = <span class="n">8091</span>,
+        secret  = <span class="s">"change-me-before-shipping"</span>,   <span class="c">// signs sessions/CSRF</span>
         db_type = .Postgres,
         postgres = gh.Postgres_Config{
             host = <span class="s">"127.0.0.1"</span>, port = <span class="n">5432</span>,
@@ -374,10 +475,11 @@ gh.hail(&amp;app, <span class="s">"/pages"</span>, <span class="s">"./templates"
 
     gh.rune(&amp;app, gh.logger)             <span class="c">// onion order</span>
     gh.rune(&amp;app, gh.cors)
-    gh.hail(&amp;app, <span class="s">"/static"</span>, <span class="s">"./public"</span>) <span class="c">// serve files</span>
+    gh.rune(&amp;app, gh.csrf)
+    gh.hail(&amp;app, <span class="s">"/docs"</span>, <span class="s">"./docs"</span>)     <span class="c">// serve files</span>
 
     sample.register(&amp;app)                <span class="c">// remember models + routes</span>
-    gh.run(&amp;app)                         <span class="c">// connect, migrate, listen</span>
+    gh.run(&amp;app)                         <span class="c">// connect, migrate, listen, drain on SIGTERM</span>
 }</pre>
 
       <div class="endpoints">
@@ -385,12 +487,15 @@ gh.hail(&amp;app, <span class="s">"/pages"</span>, <span class="s">"./templates"
         <table>
           <tr><td class="m get">GET</td><td>/sample/schema</td><td>inspect the DDL &amp; SQL Mímir generates</td></tr>
           <tr><td class="m get">GET</td><td>/sample/:id</td><td>read a row</td></tr>
-          <tr><td class="m post">POST</td><td>/sample/:name</td><td>create — returns the new id</td></tr>
-          <tr><td class="m put">PUT</td><td>/sample/:id/:name</td><td>rename by id</td></tr>
+          <tr><td class="m post">POST</td><td>/sample</td><td>create from a JSON body — returns the new id</td></tr>
+          <tr><td class="m put">PUT</td><td>/sample/:id</td><td>update from a JSON body</td></tr>
           <tr><td class="m del">DELETE</td><td>/sample/:id</td><td>forget by id</td></tr>
+          <tr><td class="m post">POST</td><td>/login · /logout</td><td>session login flow (CSRF-guarded)</td></tr>
+          <tr><td class="m get">GET</td><td>/account</td><td>behind the <code>require_login</code> ward</td></tr>
+          <tr><td class="m post">POST</td><td>/upload</td><td>multipart/form-data file upload</td></tr>
         </table>
-        <p class="hint">Data rides in the path — the server has no request-body
-        parser yet. Honest about its phase, like the rest of the codebase.</p>
+        <p class="hint">Bodies are JSON, url-encoded, or multipart — bound with
+        <code>bind_json</code>, <code>form</code>, and <code>upload</code>.</p>
       </div>
     </section>
   </main>
@@ -399,7 +504,10 @@ gh.hail(&amp;app, <span class="s">"/pages"</span>, <span class="s">"./templates"
     <div class="foot-inner">
       <span class="brand">ᚷ Gjallarhorn</span>
       <p>Heimdall is listening on <code>:8091</code>. Built from scratch in Odin —
-      HTTP, routing, middleware, and a Postgres wire client, no dependencies.</p>
+      HTTP server, router, middleware, sessions, an ORM with a hand-rolled
+      Postgres wire client, and a template engine. No dependencies.
+      <a href="https://aur.archlinux.org/packages/gjallarhorn-git">gjallarhorn-git</a>
+      on the AUR.</p>
     </div>
   </footer>
 </body>

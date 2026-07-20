@@ -186,7 +186,7 @@ verb next to its logic.
 | `mimir.odin` | Mímir, the ORM (writes *and* reads — `scan` hydrates rows into structs) |
 | `postgres.odin` | a from-scratch PostgreSQL v3 wire-protocol client (SCRAM auth, pooling) |
 | `tls.odin` | optional OpenSSL TLS for the DB connection and the HTTP server (opt-in) |
-| `cli/` | the `gjallarhorn` scaffolding CLI (`new`, `generate resource`) |
+| `cli/` | the `gjallarhorn` CLI: `new`, `generate resource`, and `bench` (load generator) |
 
 ### Routing
 
@@ -777,13 +777,49 @@ response back through the same Bifrost.
 **Concurrency.** `run()` starts a fixed pool of `Config.workers` threads (default
 `256`), each accepting on the shared listening socket, so a connection flood
 can't spawn unbounded threads. Excess connections wait in the kernel backlog.
-Each worker owns its own temp allocator, reset per request.
+Each worker owns its own temp allocator, reset per request. (See
+[Performance](#performance--and-should-it-be-an-event-loop) — `256` is generous;
+on a small box a lower count is often faster.)
 
 **Shutdown.** `SIGINT`/`SIGTERM` flip a shutdown flag: workers stop accepting,
 finish the request in flight, and decline to read another on a kept-alive
 connection; `run()` joins them, closes the DB pool, and returns cleanly.
 `SIGPIPE` is ignored, so a client hanging up mid-response returns an error
 instead of killing the process.
+
+---
+
+## Performance — and "should it be an event loop?"
+
+The server is a **bounded thread pool**, not an event loop. `gjallarhorn bench`
+(a self-contained load generator, `cli/bench.odin`) answers what that costs.
+Numbers below are loopback on an 8-core box, so they measure the framework, not a
+network — treat them as ratios, not absolutes.
+
+```sh
+gjallarhorn bench load http://127.0.0.1:8091/docs/index.html -c 50 -d 5
+gjallarhorn bench hold http://127.0.0.1:8091/ -c 60 -d 14   # pin 60 workers idle
+```
+
+- **It's fast and scales.** ~350k req/s serving a static file, flat from 8 to 256
+  concurrent clients, p99 under 1 ms. A cached Loom render measures the same as a
+  static read — the parse cache does its job.
+- **Keep-alive matters ~4×.** 358k req/s with keep-alive vs 85k when every request
+  reopens the connection (accept + handshake + thread dispatch dominate).
+- **Oversubscription has a cliff.** At 200 clients, 16–64 workers gave ~360k
+  req/s; **256 workers gave only ~126k** (p99 6 ms) — too many threads thrash. The
+  sweet spot tracks core count, so the `256` default is high for small boxes; set
+  `Config.workers` (or `GJ_WORKERS`) to roughly a small multiple of your cores.
+- **Idle keep-alive connections are the real limit (head-of-line).** Holding 60 of
+  64 workers with idle-but-open connections cut throughput for everyone else
+  ~2.6× (350k → 137k); hold *all* of them and new clients wait in the kernel
+  backlog until the idle timeout. This is the one place an event loop wins — an
+  idle connection there costs a file descriptor, not a thread.
+
+**Verdict:** for ordinary traffic (active clients, keep-alive, ideally a reverse
+proxy absorbing slow ones) the pool is more than enough — no event loop needed.
+Reach for one only if the goal becomes serving *many mostly-idle long-lived*
+connections directly (websockets, long-poll, slow mobile clients with no proxy).
 
 ---
 
@@ -892,7 +928,7 @@ That gives you `GET /users/:id`, `POST /users`, `PUT /users/:id`,
 ```
 .
 ├── gjallarhorn/        # the framework (package gjallarhorn)
-├── cli/                # the `gh` scaffolding CLI (odin build cli -out:gh)
+├── cli/                # the `gjallarhorn` CLI: scaffolding + `bench` load generator
 ├── sample/             # a small MVC example app
 ├── templates/          # Loom templates served at /pages
 ├── docs/               # the static docs site served at /docs

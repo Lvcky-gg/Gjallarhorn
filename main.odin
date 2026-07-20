@@ -1,14 +1,24 @@
 package main
 
 import "core:fmt"
+import "core:os"
+import "core:strconv"
 import gh "gjallarhorn"
 import "sample"
 
 // Mimir is the ORM (gjallarhorn/mimir.odin); it speaks Postgres over a
 // from-scratch wire-protocol client (gjallarhorn/postgres.odin).
 main :: proc() {
+	// GJ_WORKERS overrides the connection worker-pool size — handy for the
+	// benchmark harness (bench/) to sweep it; 0/unset uses the default.
+	workers := 0
+	if s, ok := os.lookup_env("GJ_WORKERS", context.temp_allocator); ok {
+		workers, _ = strconv.parse_int(s)
+	}
+
 	app := gh.new(gh.Config{
 		port    = 8091,
+		workers = workers,
 		// host left empty -> bind to loopback. Set e.g. "0.0.0.0" to expose.
 		db_type = .Postgres,
 		// Set a dbname to go live: run() then connects and auto-migrates every

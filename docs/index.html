@@ -319,57 +319,151 @@ gh.login(b, user_id)</pre>
         <h2>Mímir — the ORM and the well of memory</h2>
       </div>
       <p class="prose">
-        Mímir guards the well beneath Yggdrasil whose water is memory. Here your
-        structs describe a shape and Mímir remembers it as rows. <code>db:</code>
-        struct tags drive everything; you never write a <code>CREATE TABLE</code>.
-        And — crucially — <strong>values never reach the SQL string</strong>. Every
-        value is a bound parameter, held end to end through the hand-rolled
-        Postgres wire client (SCRAM-SHA-256 auth, optional TLS).
+        Mímir guards the well beneath Yggdrasil whose water is memory. In the myth
+        Óðinn traded an eye for a single draught; here your <strong>structs
+        describe a shape</strong> and Mímir remembers it as rows. You never write a
+        <code>CREATE TABLE</code>, you never write an <code>INSERT</code>, and — the
+        load-bearing promise — <strong>values never reach the SQL string</strong>.
+        Every value is a bound parameter (<code>$1</code>, <code>$2</code>, …)
+        carried end-to-end through a from-scratch PostgreSQL wire client:
+        SCRAM-SHA-256 auth, a connection pool, optional TLS, no libpq.
       </p>
 
-      <pre class="code"><span class="c">// Rich column types map straight from Odin types.</span>
-Event :: struct {
-    id:      int         `db:<span class="s">"id,pk,auto"</span>`,       <span class="c">// BIGSERIAL PK</span>
-    name:    string      `db:<span class="s">"name,notnull"</span>`,     <span class="c">// TEXT</span>
-    at:      time.Time    `db:<span class="s">"at"</span>`,               <span class="c">// TIMESTAMPTZ</span>
-    ref:     gh.Uuid      `db:<span class="s">"ref"</span>`,              <span class="c">// UUID</span>
-    blob:    []u8         `db:<span class="s">"blob"</span>`,             <span class="c">// BYTEA</span>
-    meta:    gh.Json      `db:<span class="s">"meta"</span>`,             <span class="c">// JSONB</span>
-    note:    Maybe(string) `db:<span class="s">"note"</span>`,            <span class="c">// nullable — NULL is None, not ""</span>
-}
-gh.remember(app, Event)   <span class="c">// migrate() carves + alters the table at run()</span></pre>
-
+      <h3 class="sub">The model — <code>db:</code> tags are the schema</h3>
+      <p class="prose">
+        A struct field's <code>db:</code> tag is its column: a name, then
+        comma-separated flags. Field type decides the SQL type; wrap it in
+        <code>Maybe(T)</code> to make the column nullable.
+      </p>
+      <pre class="code">Article :: struct {
+    id:       int           `db:<span class="s">"id,pk,auto"</span>`,          <span class="c">// BIGINT primary key, auto-assigned</span>
+    slug:     string        `db:<span class="s">"slug,unique,notnull"</span>`,  <span class="c">// UNIQUE NOT NULL TEXT</span>
+    author:   int           `db:<span class="s">"author_id,fk:users.id"</span>`, <span class="c">// REFERENCES users(id)</span>
+    body:     string        `db:<span class="s">"body"</span>`,
+    tags:     gh.Json        `db:<span class="s">"tags"</span>`,                 <span class="c">// JSONB</span>
+    posted:   time.Time      `db:<span class="s">"posted_at"</span>`,            <span class="c">// TIMESTAMPTZ</span>
+    edited:   Maybe(time.Time) `db:<span class="s">"edited_at"</span>`,          <span class="c">// nullable — NULL is None, not a zero time</span>
+    secret:   string        `db:<span class="s">"-"</span>`,                    <span class="c">// skipped: no column at all</span>
+}</pre>
       <div class="verb-table">
-        <div class="verb"><b>carve</b><span>CREATE TABLE</span><em>carve a struct's shape into the well</em></div>
-        <div class="verb"><b>offer</b><span>INSERT</span><em>offer a value to the well (RETURNING the pk on Postgres)</em></div>
-        <div class="verb"><b>recall</b><span>SELECT</span><em>recall rows — a Query you refine with whose / order_by / limit</em></div>
+        <div class="verb"><b>"name"</b><span>column</span><em>the column name; the field name is used if you omit it</em></div>
+        <div class="verb"><b>pk</b><span>PRIMARY KEY</span><em>the primary key amend / forget target by</em></div>
+        <div class="verb"><b>auto</b><span>auto-assign</span><em>server-generated id (BIGSERIAL) — omitted from inserts</em></div>
+        <div class="verb"><b>notnull</b><span>NOT NULL</span><em>required column</em></div>
+        <div class="verb"><b>unique</b><span>UNIQUE</span><em>unique constraint</em></div>
+        <div class="verb"><b>fk:t.c</b><span>REFERENCES</span><em>foreign key to <code>table.column</code></em></div>
+        <div class="verb"><b>-</b><span>skip</span><em>not persisted — no column for this field</em></div>
+      </div>
+
+      <p class="prose">Odin types map to columns both directions — the DDL Mímir
+      carves, the parameter it binds, and the value <code>scan</code> hydrates
+      back:</p>
+      <div class="verb-table">
+        <div class="verb"><b>int · i8…i64 · u8…u64</b><span>BIGINT</span><em>the whole integer family</em></div>
+        <div class="verb"><b>f32 · f64</b><span>DOUBLE PRECISION</span><em>floating point</em></div>
+        <div class="verb"><b>bool</b><span>BOOLEAN</span><em>t / f on the wire</em></div>
+        <div class="verb"><b>string</b><span>TEXT</span><em>UTF-8 text</em></div>
+        <div class="verb"><b>time.Time</b><span>TIMESTAMPTZ</span><em>UTC instant, offset folded out on read</em></div>
+        <div class="verb"><b>[]u8</b><span>BYTEA</span><em>raw bytes, hex-framed</em></div>
+        <div class="verb"><b>gh.Uuid</b><span>UUID</span><em>core:encoding/uuid Identifier</em></div>
+        <div class="verb"><b>gh.Json</b><span>JSONB</span><em>raw JSON text, validated server-side</em></div>
+        <div class="verb"><b>Maybe(T)</b><span>nullable</span><em>SQL NULL ⇢ None, value ⇢ Some(v) — never conflated</em></div>
+      </div>
+
+      <h3 class="sub">The five verbs</h3>
+      <p class="prose">
+        Mímir's vocabulary is the well's. Build a statement with a verb, then run
+        it against a <strong>Well</strong> — the handle to the live connection,
+        drawn from the Bifrost (<code>well(b)</code>) or the App
+        (<code>well(app)</code>).
+      </p>
+      <div class="verb-table">
+        <div class="verb"><b>carve</b><span>CREATE TABLE</span><em>carve a struct's shape into the well (migrate does this for you)</em></div>
+        <div class="verb"><b>offer</b><span>INSERT</span><em>offer a value; RETURNING the new pk on Postgres</em></div>
+        <div class="verb"><b>recall</b><span>SELECT</span><em>begin a Query, refined with whose / join / order_by / limit</em></div>
         <div class="verb"><b>amend</b><span>UPDATE</span><em>amend a remembered row by its primary key</em></div>
         <div class="verb"><b>forget</b><span>DELETE</span><em>make the well forget a row by its primary key</em></div>
       </div>
 
+      <h3 class="sub">Reading — the query builder</h3>
       <p class="prose">
-        A handler draws its well straight from the Bifrost, then scans rows back
-        into typed structs — <code>Maybe(T)</code> fields carry a real SQL NULL as
-        <code>None</code>, never conflated with an empty value:
+        <code>recall</code> starts a <code>SELECT</code> over a model's columns;
+        chain <code>whose</code> (WHERE), <code>join</code>, <code>order_by</code>,
+        and <code>limit</code>, then <code>sql</code> to freeze it into a
+        statement. In <code>whose</code>, write <code>?</code> for each value —
+        Mímir renumbers them to <code>$1, $2, …</code> and ships the values
+        <em>separately</em>. That is the SQL-injection checkpoint, and it holds no
+        matter what the value is.
       </p>
-      <pre class="code">get_handler :: proc(b: ^gh.Bifrost) {
-    id, _ := gh.param_int(b, <span class="s">"id"</span>)
-    w := gh.well(b)
-    q := gh.recall(w, Event); gh.whose(&amp;q, <span class="s">"id = ?"</span>, id); gh.limit(&amp;q, <span class="n">1</span>)
-    rows, ok := gh.query(w, gh.sql(&amp;q))
-    <span class="k">if</span> !ok { gh.text(b, <span class="n">503</span>, <span class="s">"database unavailable"</span>); <span class="k">return</span> }
-    <span class="k">if</span> row, found := gh.scan_one(rows, Event); found {
-        gh.json(b, <span class="n">200</span>, row)
-    } <span class="k">else</span> { gh.not_found(b) }
-}</pre>
+      <pre class="code">w := gh.well(b)
+q := gh.recall(w, Article)
+gh.join(&amp;q, <span class="s">"JOIN users ON users.id = articles.author_id"</span>)
+gh.whose(&amp;q, <span class="s">"users.name = ? AND posted_at &gt; ?"</span>, name, since)  <span class="c">// ? -&gt; $1, $2</span>
+gh.order_by(&amp;q, <span class="s">"posted_at DESC"</span>)
+gh.limit(&amp;q, <span class="n">20</span>)
 
+rows, ok := gh.query(w, gh.sql(&amp;q))          <span class="c">// query -&gt; Pg_Rows; exec -&gt; bool (no rows)</span>
+articles := gh.scan(rows, Article)            <span class="c">// []Article, fields hydrated by db: name</span></pre>
+      <p class="prose">
+        <code>scan</code> hydrates every row into a <code>[]T</code>;
+        <code>scan_one</code> returns the first with an <code>ok</code> for the
+        empty case. Columns match fields by mapped name — an unmatched column is
+        ignored, an unmatched field left zero — and a <code>Maybe(T)</code> field
+        distinguishes a real NULL from an empty value.
+      </p>
+
+      <h3 class="sub">Writing, and reading the error</h3>
+      <p class="prose">
+        A failed query isn't just <code>false</code>: <code>Pg_Rows.err</code>
+        carries the Postgres <strong>SQLSTATE</strong>, so a handler can tell a
+        constraint violation from an outage and answer accordingly.
+      </p>
+      <pre class="code">rows, ok := gh.query(w, gh.offer(w, Article{slug = slug, body = body}))
+<span class="k">if</span> !ok {
+    <span class="k">if</span> gh.failed(rows) &amp;&amp; rows.err.code == <span class="s">"23505"</span> {   <span class="c">// unique_violation</span>
+        gh.text(b, <span class="n">409</span>, <span class="s">"slug already taken"</span>)
+    } <span class="k">else</span> {
+        gh.text(b, <span class="n">503</span>, <span class="s">"database unavailable"</span>)
+    }
+    <span class="k">return</span>
+}
+id, _ := strconv.parse_int(rows.rows[<span class="n">0</span>][<span class="n">0</span>])   <span class="c">// the RETURNING id</span>
+
+<span class="c">// amend / forget target the row by its primary key.</span>
+gh.exec(w, gh.amend(w, Article{id = id, body = <span class="s">"edited"</span>}))
+gh.exec(w, gh.forget(w, Article{id = id}))</pre>
+
+      <h3 class="sub">Transactions</h3>
+      <p class="prose">
+        <code>tx</code> pins one pooled connection, wraps your closure in
+        <code>BEGIN</code>/<code>COMMIT</code>, and rolls back if it returns
+        <code>false</code> — so a batch is all-or-nothing. (For a transaction that
+        must span several handlers, <code>pin</code>/<code>unpin</code> hold a
+        dedicated connection across calls.)
+      </p>
+      <pre class="code">ok := gh.tx(w, proc(w: gh.Well) -&gt; bool {
+    _, a := gh.query(w, gh.offer(w, Article{slug = <span class="s">"a"</span>}))
+    _, b := gh.query(w, gh.offer(w, Article{slug = <span class="s">"b"</span>}))
+    <span class="k">return</span> a &amp;&amp; b   <span class="c">// either insert failing rolls back both</span>
+})</pre>
+
+      <h3 class="sub">Migrations</h3>
+      <p class="prose">
+        <code>remember</code> hands Mímir a model; at <code>run()</code>,
+        <code>migrate</code> carves any missing tables and <code>ALTER</code>s in
+        any new columns you've added since — additive, non-destructive, logged.
+        Set <code>db_type</code> to <code>.Postgres</code>, <code>.MySQL</code>, or
+        <code>.SQLite</code> for the dialect (DDL is generated for all three;
+        <code>query</code>/<code>exec</code> run against Postgres today).
+      </p>
       <div class="note">
         <strong>Offline by design.</strong> Leave <code>dbname</code> empty and
         Mímir stays out of the water — migrations print their DDL instead of
         executing, so local development needs no database at all. Set a
         <code>dbname</code> to go live: <code>run()</code> connects, runs the
         startup/auth handshake (trust, cleartext, MD5, or SCRAM-SHA-256, with
-        optional TLS), and auto-migrates every remembered model into real tables.
+        optional TLS), auto-migrates every remembered model, and pools the
+        connections your handlers draw with <code>well</code>.
       </div>
     </section>
 
@@ -485,6 +579,11 @@ gjallarhorn generate resource users   <span class="c"># -> users/{model,controll
         wires <code>GET /users/:id</code>, <code>POST /users</code>,
         <code>PUT /users/:id</code>, and <code>DELETE /users/:id</code>. Drop
         <code>users.register(&amp;app)</code> into <code>main()</code> and it's live.
+      </p>
+      <p class="prose">
+        The same command also load-tests a running app —
+        <code>gjallarhorn bench load http://127.0.0.1:8091/ -c 50 -d 5</code> —
+        a self-contained generator reporting req/s and latency percentiles.
       </p>
     </section>
 

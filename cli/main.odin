@@ -46,6 +46,13 @@ main :: proc() {
 			fmt.eprintfln("unknown generate target %q (supported: resource)", args[1])
 			os.exit(1)
 		}
+	case "bench":
+		// Load-test a running Gjallarhorn app. See bench.odin.
+		if len(args) < 3 {
+			fmt.eprintln("usage: gh bench <load|hold> <url> [-c N] [-d SECONDS] [-close]")
+			os.exit(1)
+		}
+		os.exit(run_bench(args[1:]))
 	case "help", "-h", "--help":
 		usage()
 	case:
@@ -61,11 +68,13 @@ usage :: proc() {
 	fmt.println("Usage:")
 	fmt.println("  gh new <app>                  scaffold a new, runnable app (vendors the library)")
 	fmt.println("  gh generate resource <name>   scaffold a CRUD resource package (alias: g res)")
+	fmt.println("  gh bench <load|hold> <url>    load-test a running app (-c N -d SECONDS -close)")
 	fmt.println("  gh help                       show this help")
 	fmt.println("")
 	fmt.println("Examples:")
 	fmt.println("  gh new blog                   -> blog/ with main.odin + gjallarhorn/ vendored")
 	fmt.println("  gh generate resource users    -> users/{model,controller,routes}.odin")
+	fmt.println("  gh bench load http://127.0.0.1:8091/ -c 50 -d 5")
 }
 
 // gen_new scaffolds a new project directory: a minimal, runnable main.odin plus a

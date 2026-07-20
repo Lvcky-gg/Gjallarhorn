@@ -59,13 +59,11 @@ rate_limit_token_bucket :: proc(t: ^testing.T) {
 		}
 	}
 	testing.expect_value(t, allowed, 3)
-}
 
-@(test)
-rate_limit_rune_answers_429 :: proc(t: ^testing.T) {
-	// The Rune itself: an over-limit request gets 429 + Retry-After and never
-	// reaches the handler. Uses its own key ("unknown", from a socketless
-	// Bifrost) so it can't disturb the accounting test above.
+	// (f) The Rune itself: an over-limit request gets 429 + Retry-After and never
+	//     reaches the handler. This lives in the same proc as the accounting
+	//     above on purpose — the knobs are package globals, so two rate-limit
+	//     tests running in parallel would read each other's settings.
 	gh.rate_limit_rps = 1
 	gh.rate_limit_burst = 1
 	rl_next_calls = 0

@@ -167,19 +167,26 @@ verb next to its logic.
 | File | What it holds |
 | --- | --- |
 | `app.odin` | `App` / `Config` / `new` |
-| `server.odin` | listen / accept (one thread per connection) / request parsing / keep-alive |
-| `router.odin` | routes, `get`/`post`/`put`/`delete`, path matching + dispatch |
-| `middleware.odin` | the Rune chain: `rune`, `next`, and built-in `cors`, `logger` |
+| `server.odin` | listen, the bounded worker pool, request framing, keep-alive, graceful shutdown |
+| `router.odin` | routes, `get`/`post`/`put`/`patch`/`delete` (+`head`/`options`), Wards, dispatch |
+| `middleware.odin` | the Rune chain: `rune`, `next`, panic recovery, built-in `cors`/`logger` |
 | `bifrost.odin` | the request/response object and its helpers |
 | `body.odin` | request-body decoders: `bind_json`, `form`, query/percent decoding |
+| `multipart.odin` | `multipart/form-data` parsing: `files` / `upload` |
 | `response.odin` | writing HTTP/1.1 responses |
 | `session.odin` | signed-cookie sessions + `cookie` / `set_cookie` |
+| `auth.odin` | `login` / `logout` / `current_user` and the `require_login` Ward |
+| `password.odin` | Argon2id `hash_password` / `verify_password` (PHC format) |
+| `csrf.odin` | the `csrf` rune: session-backed synchronizer token |
+| `ratelimit.odin` | the `rate_limit` rune: per-client token bucket |
+| `log.odin` | leveled, structured logging (`logf` / `logft`) |
 | `static.odin` | `hail` + traversal-safe file serving |
 | `loom.odin` | HTTP glue for Loom: `render`, `html`, directory mounts |
 | `loom/` | Loom, the template engine (package `loom`) |
 | `mimir.odin` | Mímir, the ORM (writes *and* reads — `scan` hydrates rows into structs) |
 | `postgres.odin` | a from-scratch PostgreSQL v3 wire-protocol client (SCRAM auth, pooling) |
 | `tls.odin` | optional OpenSSL TLS for the DB connection and the HTTP server (opt-in) |
+| `cli/` | the `gjallarhorn` scaffolding CLI (`new`, `generate resource`) |
 
 ### Routing
 
@@ -373,6 +380,30 @@ gh.logout(b)
 // Built-in ward; or write your own for roles/ownership.
 gh.get(&app, "/account", account_handler, gh.require_login)
 ```
+
+**Passwords.** `login` deliberately assumes you've already checked the
+credentials — `hash_password` / `verify_password` are that check. They use
+**Argon2id** (RFC 9106) with OWASP's recommended cost, a fresh 16-byte CSPRNG
+salt per password, and a constant-time comparison. The result is a standard PHC
+string you store verbatim:
+
+```odin
+// at signup
+stored, ok := gh.hash_password(fields["password"], context.allocator)
+// -> "$argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>"
+
+// at login
+if !gh.verify_password(fields["password"], stored) {
+    gh.text(b, 401, "invalid username or password")   // same answer for both cases
+    return
+}
+gh.login(b, user_id)
+```
+
+Because the salt and cost travel inside the hash, raising `gh.PASSWORD_PARAMS`
+later doesn't invalidate existing hashes — they keep verifying at the cost they
+were made with. Hashing is *meant* to be slow (~19 MiB per call), which makes a
+login endpoint a natural DoS target, so pair it with the `rate_limit` rune.
 
 **CSRF** is a session-backed synchronizer token, registered as a rune. Safe
 methods (GET/HEAD/OPTIONS) seed a token; unsafe ones must echo it back in the
@@ -730,8 +761,8 @@ instead of killing the process.
 from the GET route); HTTP keep-alive, chunked transfer decoding, and pipelining;
 a **bounded worker pool** with **graceful SIGTERM/SIGINT drain**; per-request
 panic recovery; cookies and HMAC-signed sessions with server-enforced expiry;
-**CSRF** protection, per-client **rate limiting**, and **Wards** (per-route auth
-guards) with `login`/`logout`/`current_user`; the ORM's full read/write/transaction path with struct hydration
+**CSRF** protection, per-client **rate limiting**, **Wards** (per-route auth
+guards) with `login`/`logout`/`current_user`, and **Argon2id password hashing**; the ORM's full read/write/transaction path with struct hydration
 over `int`/`float`/`bool`/`string`, `time.Time`, `uuid`, `bytea`, `JSONB`, and
 `Maybe(T)` nullables; SCRAM-SHA-256 auth; connection pooling; optional TLS on
 both the DB connection and the HTTP server; template inheritance, includes,

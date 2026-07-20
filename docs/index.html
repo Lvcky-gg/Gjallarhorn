@@ -282,7 +282,27 @@ require_login :: proc(b: ^gh.Bifrost) -> bool {
     gh.text(b, <span class="n">401</span>, <span class="s">"login required"</span>)
     <span class="k">return</span> <span class="k">false</span>
 }</pre>
+      <p class="prose">
+        <code>login</code> deliberately assumes the credentials were already
+        checked — <code>hash_password</code> / <code>verify_password</code> are
+        that check: <strong>Argon2id</strong> (RFC 9106) at OWASP's cost, a fresh
+        CSPRNG salt per password, constant-time comparison, stored as a standard
+        PHC string. The salt and cost ride inside the hash, so raising the cost
+        later never invalidates existing passwords.
+      </p>
+      <pre class="code"><span class="c">// at signup — store this string verbatim</span>
+stored, ok := gh.hash_password(fields[<span class="s">"password"</span>], context.allocator)
+<span class="c">// "$argon2id$v=19$m=19456,t=2,p=1$&lt;salt&gt;$&lt;hash&gt;"</span>
+
+<span class="c">// at login — same answer for a bad user and a bad password</span>
+<span class="k">if</span> !gh.verify_password(fields[<span class="s">"password"</span>], stored) {
+    gh.text(b, <span class="n">401</span>, <span class="s">"invalid username or password"</span>)
+    <span class="k">return</span>
+}
+gh.login(b, user_id)</pre>
+
       <div class="verb-table">
+        <div class="verb"><b>passwords</b><span>Argon2id</span><em>OWASP cost, per-password salt, constant-time verify, PHC format</em></div>
         <div class="verb"><b>sessions</b><span>signed cookie</span><em>HMAC-SHA256, server-enforced expiry, Secure over TLS</em></div>
         <div class="verb"><b>csrf</b><span>synchronizer token</span><em>per-session token in header or form field, constant-time compare</em></div>
         <div class="verb"><b>wards</b><span>route guards</span><em>proc(b) -&gt; bool run before the handler; 401/403 on deny</em></div>

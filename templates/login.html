@@ -3,9 +3,10 @@
 <head><meta charset="utf-8"><title>Log in — Gjallarhorn</title></head>
 <body>
   <h1>Log in</h1>
-  <p>Any username works in this demo; the password is ignored. The hidden field
-     carries the session's CSRF token, so the POST passes the <code>csrf</code>
-     rune.</p>
+  <p>Credentials are checked for real: the password is verified with Argon2id
+     against a hash derived at startup, so a wrong one gets a 401. Try
+     <code>ratatoskr</code> / <code>gjallarhorn</code>. The hidden field carries
+     the session's CSRF token, so the POST passes the <code>csrf</code> rune.</p>
 
   <form method="POST" action="/login">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

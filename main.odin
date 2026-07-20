@@ -32,6 +32,13 @@ main :: proc() {
 	gh.rune(&app, gh.rate_limit)
 	gh.rune(&app, gh.csrf)
 
+	// Hash the demo account's password once at startup (context.allocator, not
+	// temp — it has to outlive the request that checks it). A real app stores
+	// this string in the users table at signup instead.
+	if h, ok := gh.hash_password(DEMO_PASSWORD, context.allocator); ok {
+		demo_password_hash = h
+	}
+
 	// Serve ./docs at /docs — a GET that hands back raw files.
 	gh.hail(&app, "/docs", "./docs")
 
@@ -70,10 +77,23 @@ submit_handler :: proc(b: ^gh.Bifrost) {
 // login_handler stands in for real credential checking — the demo logs in the
 // submitted username, recording it in the signed session so the require_login
 // ward admits later requests, then redirects to the guarded page.
+// The demo's "user store": one account whose password is hashed at startup (see
+// main), so nothing here is a plaintext or hardcoded credential. A real app
+// would look the row up in Mímir and compare against the stored hash the same way.
+DEMO_USER :: "ratatoskr"
+DEMO_PASSWORD :: "gjallarhorn"
+demo_password_hash: string
+
+// login_handler verifies the submitted credentials with Argon2id before opening
+// a session. verify_password is constant time, and both the unknown-user and
+// wrong-password paths answer identically so neither leaks which one it was.
 login_handler :: proc(b: ^gh.Bifrost) {
-	username := gh.form(b)["username"]
-	if username == "" {
-		username = "guest"
+	fields := gh.form(b)
+	username, password := fields["username"], fields["password"]
+
+	if username != DEMO_USER || !gh.verify_password(password, demo_password_hash) {
+		gh.text(b, 401, "401 invalid username or password")
+		return
 	}
 	gh.login(b, username)
 	gh.redirect(b, "/account")

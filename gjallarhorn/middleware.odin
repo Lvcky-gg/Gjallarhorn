@@ -44,9 +44,22 @@ run_guarded :: proc(b: ^Bifrost) {
 		next(b)
 	} else {
 		// Resumed here via longjmp: a handler faulted mid-request.
+		panic_armed = false
 		b.keep_alive = false
 		if !b.written {
-			write_response(b, 500, "text/plain; charset=utf-8", "500 internal server error")
+			// A custom 500 page (emit_error) runs post-recovery, so guard it under a
+			// fresh checkpoint: if the error handler *itself* faults, fall back to
+			// the plain default rather than aborting the process.
+			if libc.setjmp(&panic_jmp) == 0 {
+				panic_armed = true
+				emit_error(b, 500)
+				panic_armed = false
+			} else {
+				panic_armed = false
+			}
+			if !b.written {
+				write_response(b, 500, "text/plain; charset=utf-8", "500 internal server error")
+			}
 		}
 	}
 

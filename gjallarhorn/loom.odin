@@ -58,11 +58,11 @@ hail_loom :: proc(app: ^App, url_prefix: string, dir: string, provider: Provider
 serve_loom :: proc(b: ^Bifrost, mount: Loom_Mount) -> bool {
 	target, within := safe_target(mount.dir, mount.url_prefix, b.path)
 	if !within {
-		text(b, 403, "403 forbidden")
+		emit_error(b, 403)
 		return true
 	}
 	if os.is_directory(target) {
-		text(b, 403, "403 forbidden")
+		emit_error(b, 403)
 		return true
 	}
 	if !os.exists(target) {

@@ -333,6 +333,24 @@ Built-ins: `logger` (one leveled, structured line per request — colorized on a
 TTY, plain RFC3339 when piped), `cors` (permissive CORS + preflight `OPTIONS`
 short-circuit), `csrf` (see below), and `rate_limit`.
 
+**Custom error pages.** `on_error` replaces the framework's plain-text errors
+with your own handler — the errors Gjallarhorn generates on your behalf: `404`
+(no route), `500` (a handler panicked), `403` (path traversal), and the `401` a
+Ward falls back to. Errors your own code writes (a rune's `403`, `bind_json`'s
+`400`) stay under your control.
+
+```odin
+gh.on_error(&app, 404, proc(b: ^gh.Bifrost) {
+    gh.html(b, 404, "<h1>Lost in Niflheim</h1>")
+})
+gh.on_error(&app, 500, my_error_page)
+```
+
+A registered handler that declines to write still falls back to the default, so
+an error always gets a body. The `500` handler runs *after* panic recovery under
+its own guard — if it panics too, you get the plain default instead of a crashed
+worker.
+
 **Rate limiting.** `rate_limit` is a per-client token bucket: each client gets
 `rate_limit_burst` tokens refilling at `rate_limit_rps` per second, so bursts
 pass untouched and only sustained excess is refused — with a `429` and a
@@ -831,7 +849,7 @@ connections directly (websockets, long-poll, slow mobile clients with no proxy).
 from the GET route); HTTP keep-alive, chunked transfer decoding, and pipelining;
 a **bounded worker pool** with **graceful SIGTERM/SIGINT drain**; per-request
 panic recovery; cookies and HMAC-signed sessions with server-enforced expiry;
-**CSRF** protection, per-client **rate limiting**, **Wards** (per-route auth
+**CSRF** protection, per-client **rate limiting**, custom **error pages**, **Wards** (per-route auth
 guards) with `login`/`logout`/`current_user`, and **Argon2id password hashing**; the ORM's full read/write/transaction path with struct hydration
 over `int`/`float`/`bool`/`string`, `time.Time`, `uuid`, `bytea`, `JSONB`, and
 `Maybe(T)` nullables; SCRAM-SHA-256 auth; connection pooling; optional TLS on

@@ -255,6 +255,19 @@ cors :: proc(b: ^gh.Bifrost, next: gh.Next) {
         <code>X-Forwarded-For</code> instead (it's forgeable, so only with a proxy
         you trust). Idle buckets are swept, so the table can't grow unbounded.
       </p>
+
+      <p class="prose">
+        <strong>Custom error pages.</strong> <code>on_error</code> swaps the
+        framework's plain-text errors for your own — the ones Gjallarhorn emits
+        on your behalf: <code>404</code> (no route), <code>500</code> (a handler
+        panicked), <code>403</code> (path traversal), the <code>401</code> a Ward
+        falls back to. The <code>500</code> handler runs under its own recovery
+        guard, so even a bug in <em>it</em> degrades to the plain default rather
+        than crashing the worker.
+      </p>
+      <pre class="code">gh.on_error(&amp;app, <span class="n">404</span>, proc(b: ^gh.Bifrost) {
+    gh.html(b, <span class="n">404</span>, <span class="s">"&lt;h1&gt;Lost in Niflheim&lt;/h1&gt;"</span>)
+})</pre>
     </section>
 
     <!-- SECURITY -->

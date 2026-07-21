@@ -80,7 +80,7 @@ json :: proc(b: ^Bifrost, status: int, v: any) {
 }
 
 not_found :: proc(b: ^Bifrost) {
-	text(b, 404, "404 not found")
+	emit_error(b, 404)
 }
 
 // redirect points the browser at `location`. The default 303 See Other turns the

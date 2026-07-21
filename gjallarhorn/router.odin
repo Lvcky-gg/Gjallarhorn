@@ -129,7 +129,7 @@ run_matched_route :: proc(b: ^Bifrost, route: Route, params: map[string]string) 
 	// wrote nothing), allow falls through to the handler.
 	if route.ward != nil && !route.ward(b) {
 		if !b.written {
-			text(b, 401, "401 unauthorized")
+			emit_error(b, 401)
 		}
 		return
 	}

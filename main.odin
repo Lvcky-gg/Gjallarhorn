@@ -42,6 +42,11 @@ main :: proc() {
 	gh.rune(&app, gh.rate_limit)
 	gh.rune(&app, gh.csrf)
 
+	// Branded error page: replace the plain-text 404 with our own HTML. on_error
+	// covers the errors the framework generates (404/500/403/401); an app-written
+	// error keeps its own message.
+	gh.on_error(&app, 404, not_found_page)
+
 	// Hash the demo account's password once at startup (context.allocator, not
 	// temp — it has to outlive the request that checks it). A real app stores
 	// this string in the users table at signup instead.
@@ -150,6 +155,18 @@ upload_handler :: proc(b: ^gh.Bifrost) {
 			f.content_type,
 			len(f.data),
 		),
+	)
+}
+
+// not_found_page renders a branded 404 instead of the framework's plain text.
+// Registered with gh.on_error(&app, 404, …).
+not_found_page :: proc(b: ^gh.Bifrost) {
+	gh.html(
+		b,
+		404,
+		"<!doctype html><title>404 — Gjallarhorn</title>" +
+		"<h1>ᚷ Lost in Niflheim</h1><p>No route answers here. " +
+		"<a href=\"/docs\">Back to the docs.</a></p>",
 	)
 }
 

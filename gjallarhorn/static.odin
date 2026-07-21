@@ -53,13 +53,13 @@ static_cache_control := "public, max-age=3600"
 serve_static :: proc(b: ^Bifrost, mount: Static_Mount) -> bool {
 	target, within := safe_target(mount.dir, mount.url_prefix, b.path)
 	if !within {
-		text(b, 403, "403 forbidden")
+		emit_error(b, 403)
 		return true
 	}
 
 	// Reject directories explicitly; we only serve files.
 	if os.is_directory(target) {
-		text(b, 403, "403 forbidden")
+		emit_error(b, 403)
 		return true
 	}
 

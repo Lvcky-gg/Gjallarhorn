@@ -90,6 +90,7 @@ App :: struct {
 	middleware: [dynamic]Middleware,
 	statics:    [dynamic]Static_Mount,
 	looms:      [dynamic]Loom_Mount, // template dirs served + woven by hail
+	errors:     map[int]Handler,     // per-status error pages; see on_error / emit_error
 }
 
 new :: proc(cfg: Config) -> App {

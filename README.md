@@ -179,6 +179,7 @@ verb next to its logic.
 | `password.odin` | Argon2id `hash_password` / `verify_password` (PHC format) |
 | `csrf.odin` | the `csrf` rune: session-backed synchronizer token |
 | `ratelimit.odin` | the `rate_limit` rune: per-client token bucket |
+| `observ.odin` | the `request_id` and `metrics` (Prometheus) runes |
 | `log.odin` | leveled, structured logging (`logf` / `logft`) |
 | `static.odin` | `hail` + traversal-safe file serving |
 | `loom.odin` | HTTP glue for Loom: `render`, `html`, directory mounts |
@@ -878,7 +879,7 @@ over `int`/`float`/`bool`/`string`, `time.Time`, `uuid`, `bytea`, `JSONB`, and
 both the DB connection and the HTTP server; static-file caching (ETag /
 Last-Modified / conditional `304`) and precompressed `gzip_static`; template
 inheritance, includes, macros, whitespace control, the compiled-node cache, and
-direct struct rendering; leveled/structured logging; a scaffolding CLI; and CI
+direct struct rendering; leveled/structured logging with request IDs and a Prometheus /metrics endpoint; a scaffolding CLI; and CI
 that tests and publishes to the AUR on every push to `main`.
 
 **Known gaps**, in rough order of impact:

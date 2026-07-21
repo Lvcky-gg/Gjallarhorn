@@ -268,6 +268,25 @@ cors :: proc(b: ^gh.Bifrost, next: gh.Next) {
       <pre class="code">gh.on_error(&amp;app, <span class="n">404</span>, proc(b: ^gh.Bifrost) {
     gh.html(b, <span class="n">404</span>, <span class="s">"&lt;h1&gt;Lost in Niflheim&lt;/h1&gt;"</span>)
 })</pre>
+
+      <p class="prose">
+        <strong>Observability</strong> comes as two more runes.
+        <code>request_id</code> tags each request — reusing a sane inbound
+        <code>X-Request-Id</code> so an upstream proxy's trace carries through,
+        else minting one — exposes it on <code>b.request_id</code>, echoes it in
+        the response header, and has the logger print it, so a log line, the
+        client's response, and the trace all line up. <code>metrics</code> counts
+        requests by status, in-flight, and cumulative latency, and serves a
+        <strong>Prometheus</strong> exposition at <code>/metrics</code> (excluded
+        from its own counts).
+      </p>
+      <pre class="code">gh.rune(&amp;app, gh.metrics)      <span class="c">// outermost — times the chain, serves /metrics</span>
+gh.rune(&amp;app, gh.request_id)   <span class="c">// before logger, so the id reaches log + header</span>
+gh.rune(&amp;app, gh.logger)
+
+<span class="c">// $ curl localhost:8091/metrics</span>
+<span class="c">// gjallarhorn_requests_total{status="2xx"} 128</span>
+<span class="c">// gjallarhorn_requests_in_flight 2</span></pre>
     </section>
 
     <!-- SECURITY -->

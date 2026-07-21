@@ -534,8 +534,50 @@ gh.hail(&amp;app, <span class="s">"/docs"</span>, <span class="s">"./docs"</span
       </p>
     </section>
 
+    <!-- FETCH -->
+    <section id="fetch" class="alt">
+      <div class="section-head">
+        <span class="kicker">Sounding out — calling other APIs</span>
+        <h2>Fetch — the outbound client</h2>
+      </div>
+      <p class="prose">
+        A handler often needs to call <em>out</em> — a payment gateway, a webhook,
+        another service. <code>fetch</code> is a small outbound HTTP(S) client
+        built from the same pieces as the server: <code>net</code> for the socket,
+        <code>wire_send</code>/<code>wire_recv</code> (which already abstract
+        plaintext vs TLS), and <code>parse_headers</code> for the reply. It sends
+        <code>Connection: close</code>, reads to EOF, and de-chunks a chunked
+        response.
+      </p>
+      <pre class="code"><span class="c">// The zero-value request is a plain GET.</span>
+res, ok := gh.fetch(<span class="s">"https://api.example.com/v1/things"</span>)
+<span class="k">if</span> ok &amp;&amp; res.status == <span class="n">200</span> {
+    payload: My_Type
+    json.unmarshal(res.body_bytes, &amp;payload)  <span class="c">// res.body is the same bytes as string</span>
+}
+
+<span class="c">// Method, headers, body, timeout via Fetch_Request; reply headers are lower-cased.</span>
+res, ok = gh.fetch(<span class="s">"https://api.example.com/things"</span>, gh.Fetch_Request{
+    method  = <span class="s">"POST"</span>,
+    headers = {<span class="s">"Authorization"</span> = <span class="s">"Bearer …"</span>},
+    body    = <span class="s">`{"name":"skuld"}`</span>,
+})
+
+<span class="c">// fetch_json marshals the payload and sets Content-Type: application/json.</span>
+res, ok = gh.fetch_json(<span class="s">"POST"</span>, <span class="s">"https://api.example.com/things"</span>, My_Type{})</pre>
+      <p class="prose">
+        <code>ok</code> is false only on a <strong>transport</strong> failure
+        (DNS, connect, TLS, or no parseable response) — a <code>4xx</code>/<code>5xx</code>
+        still returns <code>ok=true</code> with the status set. Redirects are
+        returned, not followed (read <code>res.headers["location"]</code>). An
+        <code>https://</code> URL needs a <code>-define:GJ_TLS=true</code> build —
+        the same OpenSSL gate as the DB and server — and without it an https fetch
+        fails fast instead of falling back to plaintext.
+      </p>
+    </section>
+
     <!-- LOOM -->
-    <section id="loom" class="alt">
+    <section id="loom">
       <div class="section-head">
         <span class="kicker">The Norns weave the threads of fate</span>
         <h2>Loom — the templating engine</h2>
@@ -591,7 +633,7 @@ gh.hail(&amp;app, <span class="s">"/docs"</span>, <span class="s">"./docs"</span
     </section>
 
     <!-- CLI -->
-    <section id="cli">
+    <section id="cli" class="alt">
       <div class="section-head">
         <span class="kicker">Scaffolding, nest-style</span>
         <h2>The gjallarhorn CLI</h2>
@@ -625,7 +667,7 @@ gjallarhorn generate resource users   <span class="c"># -> users/{model,controll
     </section>
 
     <!-- INSTALL -->
-    <section id="install" class="alt">
+    <section id="install">
       <div class="section-head">
         <span class="kicker">Sound the horn</span>
         <h2>Install</h2>
@@ -651,7 +693,7 @@ odin build cli -out:gh           <span class="c"># build the CLI yourself</span>
     </section>
 
     <!-- QUICKSTART -->
-    <section id="quickstart">
+    <section id="quickstart" class="alt">
       <div class="section-head">
         <span class="kicker">The whole ceremony</span>
         <h2>Quickstart</h2>

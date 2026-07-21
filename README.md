@@ -173,6 +173,7 @@ verb next to its logic.
 | `bifrost.odin` | the request/response object and its helpers |
 | `body.odin` | request-body decoders: `bind_json`, `form`, query/percent decoding |
 | `multipart.odin` | `multipart/form-data` parsing: `files` / `upload` |
+| `fetch.odin` | outbound HTTP(S) client — `fetch` / `fetch_json` to call other APIs |
 | `response.odin` | writing HTTP/1.1 responses |
 | `session.odin` | signed-cookie sessions + `cookie` / `set_cookie` |
 | `auth.odin` | `login` / `logout` / `current_user` and the `require_login` Ward |
@@ -728,6 +729,50 @@ build. Gjallarhorn does **not** compress on the fly: Odin's core ships a gzip
 
 ---
 
+### Fetch — calling other APIs
+
+Handlers often need to call *out* — a payment gateway, a webhook, another
+service. `fetch` is a small outbound HTTP(S) client built from the same pieces as
+the server: `net` for the socket, `wire_send`/`wire_recv` (which already abstract
+plaintext vs TLS), and `parse_headers` for the response. It sends
+`Connection: close`, reads to EOF, and de-chunks a chunked reply.
+
+```odin
+res, ok := gh.fetch("https://api.example.com/v1/things")
+if ok && res.status == 200 {
+    payload: My_Type
+    json.unmarshal(res.body_bytes, &payload)   // res.body is the same bytes as string
+}
+```
+
+The zero-value request is a plain `GET`. Set a method, headers, or a body through
+`Fetch_Request`; response `headers` keys are lower-cased, so
+`res.headers["content-type"]` works regardless of how the server cased it:
+
+```odin
+res, ok := gh.fetch("https://api.example.com/things", gh.Fetch_Request{
+    method  = "POST",
+    headers = {"Authorization" = "Bearer …"},
+    body    = `{"name":"skuld"}`,
+    timeout = 5 * time.Second,               // 0 -> FETCH_TIMEOUT (30s)
+})
+```
+
+`fetch_json` is the same call with a JSON body: it marshals the payload and sets
+`Content-Type: application/json` for you.
+
+```odin
+res, ok := gh.fetch_json("POST", "https://api.example.com/things", My_Type{…})
+```
+
+`ok` is false only on a **transport** failure (DNS, connect, TLS, or no parseable
+response) — a `4xx`/`5xx` still returns `ok=true` with `res.status` set. Redirects
+are returned, not followed (read `res.headers["location"]`). An `https://` URL
+needs a **`-define:GJ_TLS=true`** build (same OpenSSL gate as the DB and server);
+without it, an https fetch fails fast rather than falling back to plaintext.
+
+---
+
 ## TLS / HTTPS
 
 TLS is **opt-in at build time**. Odin ships no TLS in `core` or `vendor`, so
@@ -899,7 +944,7 @@ over `int`/`float`/`bool`/`string`, `time.Time`, `uuid`, `bytea`, `JSONB`, and
 both the DB connection and the HTTP server; static-file caching (ETag /
 Last-Modified / conditional `304`) and precompressed `gzip_static`; template
 inheritance, includes, macros, whitespace control, the compiled-node cache, and
-direct struct rendering; leveled/structured logging with request IDs and a Prometheus /metrics endpoint; a scaffolding CLI; and CI
+direct struct rendering; leveled/structured logging with request IDs and a Prometheus /metrics endpoint; an outbound HTTP(S) client for calling other APIs; a scaffolding CLI; and CI
 that tests and publishes to the AUR on every push to `main`.
 
 **Known gaps**, in rough order of impact:

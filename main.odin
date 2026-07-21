@@ -83,6 +83,10 @@ main :: proc() {
 	// surfaces from a multipart body just like a urlencoded one.
 	gh.post(&app, "/upload", upload_handler)
 
+	// fetch demo: call another API from a handler. Here it calls this very server
+	// over loopback and reports what came back — proof the outbound client works.
+	gh.get(&app, "/proxy", proxy_handler)
+
 	sample.register(&app)
 	gh.run(&app)
 }
@@ -160,6 +164,26 @@ upload_handler :: proc(b: ^gh.Bifrost) {
 			f.content_type,
 			len(f.data),
 		),
+	)
+}
+
+// proxy_handler shows the outbound HTTP client (gh.fetch): it calls another API
+// — here, this server's own /docs page over loopback — and reports the result.
+// A real app would call a third-party API (use https:// with a -define:GJ_TLS build).
+proxy_handler :: proc(b: ^gh.Bifrost) {
+	res, ok := gh.fetch("http://127.0.0.1:8091/docs/index.html")
+	if !ok {
+		gh.text(b, 502, "upstream fetch failed")
+		return
+	}
+	gh.json(
+		b,
+		200,
+		struct {
+			upstream_status: int,
+			content_type:    string,
+			bytes:           int,
+		}{res.status, res.headers["content-type"], len(res.body_bytes)},
 	)
 }
 

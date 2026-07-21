@@ -14,6 +14,16 @@ import gh "../gjallarhorn"
 oa_handler :: proc(b: ^gh.Bifrost) {}
 oa_ward :: proc(b: ^gh.Bifrost) -> bool {return true}
 
+// A model to describe routes with — a scalar, a nullable, and a nested slice, so
+// the schema/example reflection is exercised end to end.
+Oa_Widget :: struct {
+	id:    int,
+	name:  string,
+	price: f64,
+	tags:  []string,
+	note:  Maybe(string),
+}
+
 // oa_app builds an App with a representative route table.
 oa_app :: proc() -> gh.App {
 	app := gh.new(gh.Config{docs = {enabled = true, title = "Test API", version = "9.9.9"}})
@@ -22,6 +32,7 @@ oa_app :: proc() -> gh.App {
 	gh.get(&app, "/things/:id", oa_handler)
 	gh.delete(&app, "/things/:id", oa_handler)
 	gh.get(&app, "/account", oa_handler, oa_ward) // guarded
+	gh.describe(&app, .Post, "/things", {summary = "Make a widget", request = Oa_Widget, response = Oa_Widget})
 	return app
 }
 
@@ -88,6 +99,61 @@ openapi_page_renders_endpoints :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(page, "guarded"), "flags the warded route")
 	// Loom autoescaped the class/method text; no unrendered tags leak through.
 	testing.expect(t, !strings.contains(page, "{{"), "no unrendered Loom tags")
+}
+
+@(test)
+openapi_described_route_has_schema :: proc(t: ^testing.T) {
+	app := oa_app()
+	spec := gh.openapi_spec(&app, context.temp_allocator)
+	val, err := json.parse(transmute([]u8)spec, allocator = context.temp_allocator)
+	testing.expect(t, err == .None, "spec is valid JSON")
+
+	post := val.(json.Object)["paths"].(json.Object)["/things"].(json.Object)["post"].(json.Object)
+	testing.expect_value(t, post["summary"].(json.String), "Make a widget")
+
+	// requestBody carries the Oa_Widget schema, reflected from the struct.
+	schema := post["requestBody"].(json.Object)["content"].(json.Object)["application/json"].(json.Object)["schema"].(json.Object)
+	testing.expect_value(t, schema["type"].(json.String), "object")
+	props := schema["properties"].(json.Object)
+	testing.expect_value(t, props["id"].(json.Object)["type"].(json.String), "integer")
+	testing.expect_value(t, props["price"].(json.Object)["type"].(json.String), "number")
+	testing.expect_value(t, props["tags"].(json.Object)["type"].(json.String), "array")
+	testing.expect_value(t, props["tags"].(json.Object)["items"].(json.Object)["type"].(json.String), "string")
+	// Maybe(string) -> a nullable string.
+	note := props["note"].(json.Object)
+	testing.expect_value(t, note["type"].(json.String), "string")
+	testing.expect(t, note["nullable"].(json.Boolean), "Maybe(T) is nullable")
+
+	// The 200 response also carries the schema.
+	resp200 := post["responses"].(json.Object)["200"].(json.Object)
+	_, has_content := resp200["content"]
+	testing.expect(t, has_content, "described response has a schema")
+}
+
+@(test)
+openapi_example_reflects_struct :: proc(t: ^testing.T) {
+	ex := gh.example_json(Oa_Widget, context.temp_allocator)
+	// It's valid JSON with placeholder values for each field.
+	val, err := json.parse(transmute([]u8)ex, allocator = context.temp_allocator)
+	testing.expect(t, err == .None, "example is valid JSON")
+	obj := val.(json.Object)
+	testing.expect_value(t, obj["name"].(json.String), "string")
+	testing.expect_value(t, obj["id"].(json.Float), 0)
+	_, is_arr := obj["tags"].(json.Array)
+	testing.expect(t, is_arr, "slice field examples as an array")
+}
+
+@(test)
+openapi_page_has_tryit :: proc(t: ^testing.T) {
+	app := oa_app()
+	page := gh.docs_html(&app, context.temp_allocator)
+	// The interactive bits: a per-route data-path, an Execute control, the fetch
+	// script, and (for the described POST) an editable request body.
+	testing.expect(t, strings.contains(page, `data-path="/things/:id"`), "route carries its path for JS")
+	testing.expect(t, strings.contains(page, "data-exec"), "an Execute button")
+	testing.expect(t, strings.contains(page, "await fetch(path, opts)"), "the browser calls the backend")
+	testing.expect(t, strings.contains(page, "data-body"), "described POST has an editable body")
+	testing.expect(t, strings.contains(page, "Make a widget"), "the summary shows")
 }
 
 @(test)

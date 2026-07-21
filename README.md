@@ -774,12 +774,12 @@ without it, an https fetch fails fast rather than falling back to plaintext.
 
 ---
 
-### OpenAPI docs — a self-describing API
+### OpenAPI docs — a self-describing API, with a live "Try it"
 
 Flip one config flag and Gjallarhorn serves a docs page — **woven by Loom** — plus
 an `openapi.json` document, both generated from the route table the router already
-holds. Nothing to annotate and nothing to keep in sync: register a route and it
-appears; it's off by default, so a public app pays nothing until it opts in.
+holds. Nothing to keep in sync: register a route and it appears; it's off by
+default, so a public app pays nothing until it opts in.
 
 ```odin
 app := gh.new(gh.Config{
@@ -796,18 +796,41 @@ app := gh.new(gh.Config{
 
 That mounts two GET routes:
 
-- **`/api-docs`** — an HTML page listing every endpoint with a method badge, its
-  path, and a 🔒 marker on ward-guarded routes. It's a Loom template carried in the
-  binary (inline CSS, no external assets).
-- **`/api-docs/openapi.json`** — a minimal, valid **OpenAPI 3.0.3** document. Each
-  route's `:id` segments become `{id}` path parameters, methods on a shared path are
-  grouped, and a guarded route advertises a `401`.
+- **`/api-docs`** — an interactive page. Each endpoint expands to a **Try it** panel
+  with inputs for its path parameters, an editable JSON request body, and an
+  **Execute** button that fires the request **from the browser** (a plain `fetch`,
+  same origin) and shows the live status and response. Ward-guarded routes carry a
+  🔒. It's a Loom template carried in the binary — inline CSS + a little vanilla JS,
+  no external assets, no Swagger-UI CDN.
+- **`/api-docs/openapi.json`** — a valid **OpenAPI 3.0.3** document. `:id` segments
+  become `{id}` path parameters, methods on a shared path are grouped, and a guarded
+  route advertises a `401`.
 
-Both are built from `app.routes` at *request* time, so they always mirror the live
-routes. What can't be known without schema annotations — request/response body
-shapes — is honestly omitted rather than invented, in keeping with the rest of the
-framework. Point any OpenAPI tool (Swagger UI, `openapi-generator`, Insomnia) at
-the `openapi.json` URL to explore or generate a client.
+**Give a route its schema with `describe`.** Point it at the Odin request/response
+types and Gjallarhorn reflects them into JSON Schema (and a filled-in example body
+for the Try-it form) — the same reflection Mímir uses, so a model documents itself:
+
+```odin
+gh.get(&app, "/sample/:id", get_handler)
+gh.describe(&app, .Get, "/sample/:id", {summary = "Fetch one sample", response = Sample})
+
+gh.post(&app, "/sample", create_handler)
+gh.describe(&app, .Post, "/sample", {request = Sample, response = Sample})
+```
+
+`describe` is optional and additive — an undescribed route still lists, just
+without a body schema. The reflection maps the same column types Mímir does
+(`int`/`float`/`bool`/`string`, `time.Time`, `[]u8`, `uuid`, `JSONB`) and renders
+a `Maybe(T)` field as a `nullable` property; nested structs and slices recurse.
+Property names follow a `json:"…"` tag when present, else the field name (what
+`json.marshal` would emit). What *isn't* described is omitted rather than invented.
+
+Because Execute sends a real request, it passes through your middleware: a `POST`
+to a route behind the `csrf` rune (or a Ward, or the rate limiter) gets the same
+`403`/`401`/`429` a browser would — which is usually the right thing to see. Pure
+JSON APIs typically don't enable CSRF, so their Try-it just works. You can also
+point any external tool (Swagger UI, `openapi-generator`, Insomnia) at the
+`openapi.json` URL.
 
 ---
 
@@ -982,7 +1005,7 @@ over `int`/`float`/`bool`/`string`, `time.Time`, `uuid`, `bytea`, `JSONB`, and
 both the DB connection and the HTTP server; static-file caching (ETag /
 Last-Modified / conditional `304`) and precompressed `gzip_static`; template
 inheritance, includes, macros, whitespace control, the compiled-node cache, and
-direct struct rendering; leveled/structured logging with request IDs and a Prometheus /metrics endpoint; an outbound HTTP(S) client for calling other APIs; an opt-in Loom-woven OpenAPI docs page + `openapi.json`; a scaffolding CLI; and CI
+direct struct rendering; leveled/structured logging with request IDs and a Prometheus /metrics endpoint; an outbound HTTP(S) client for calling other APIs; an opt-in Loom-woven OpenAPI docs page (reflected schemas + a live in-browser "Try it") + `openapi.json`; a scaffolding CLI; and CI
 that tests and publishes to the AUR on every push to `main`.
 
 **Known gaps**, in rough order of impact:

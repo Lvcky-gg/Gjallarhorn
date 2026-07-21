@@ -86,6 +86,17 @@ Docs_Config :: struct {
 	description: string, // optional blurb shown under the title
 }
 
+// Route_Doc annotates one route for the OpenAPI docs: a human summary and the
+// Odin types of its JSON request body and 200 response. The types are reflected
+// into JSON Schema + example values (openapi.odin), which is what lets the docs
+// page show a model and a filled-in "Try it" body, Swagger-style. Attach one with
+// `describe` (see openapi.odin); leaving a field zero just omits that part.
+Route_Doc :: struct {
+	summary:  string, // short description of what the route does
+	request:  typeid, // JSON request-body type (POST/PUT/PATCH); zero -> none
+	response: typeid, // JSON 200-response type; zero -> none
+}
+
 Config :: struct {
 	host:      string, // bind address, e.g. "0.0.0.0"; empty -> loopback
 	port:      int,
@@ -126,6 +137,7 @@ App :: struct {
 	statics:    [dynamic]Static_Mount,
 	looms:      [dynamic]Loom_Mount, // template dirs served + woven by hail
 	errors:     map[int]Handler,     // per-status error pages; see on_error / emit_error
+	route_docs: map[string]Route_Doc, // per-route OpenAPI annotations, keyed "METHOD path"; see describe
 }
 
 new :: proc(cfg: Config) -> App {

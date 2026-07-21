@@ -636,15 +636,15 @@ res, ok = gh.fetch_json(<span class="s">"POST"</span>, <span class="s">"https://
     <section id="openapi" class="alt">
       <div class="section-head">
         <span class="kicker">The framework describes itself</span>
-        <h2>OpenAPI docs — woven by Loom</h2>
+        <h2>OpenAPI docs — woven by Loom, with a live "Try it"</h2>
       </div>
       <p class="prose">
         Flip one config flag and Gjallarhorn serves a <strong>docs page</strong> —
         a Loom template carried in the binary — plus an <code>openapi.json</code>
         document, both generated from the route table the router already holds.
-        Nothing to annotate, nothing to keep in sync: register a route and it
-        appears. It's <strong>off by default</strong>, so a public app pays nothing
-        until it opts in.
+        Nothing to keep in sync: register a route and it appears. It's
+        <strong>off by default</strong>, so a public app pays nothing until it opts
+        in.
       </p>
       <pre class="code">app := gh.new(gh.Config{
     port = <span class="n">8091</span>,
@@ -652,21 +652,37 @@ res, ok = gh.fetch_json(<span class="s">"POST"</span>, <span class="s">"https://
         enabled     = <span class="k">true</span>,          <span class="c">// off by default</span>
         title       = <span class="s">"My API"</span>,
         version     = <span class="s">"1.2.0"</span>,
-        description = <span class="s">"What this service does."</span>,
-        <span class="c">// path     = "/api-docs",  // where to mount (the default)</span>
     },
-})</pre>
+})
+
+<span class="c">// Give a route its schema — reflected into JSON Schema + an example body.</span>
+gh.get(&amp;app, <span class="s">"/sample/:id"</span>, get_handler)
+gh.describe(&amp;app, .Get, <span class="s">"/sample/:id"</span>, {summary = <span class="s">"Fetch one sample"</span>, response = Sample})
+gh.post(&amp;app, <span class="s">"/sample"</span>, create_handler)
+gh.describe(&amp;app, .Post, <span class="s">"/sample"</span>, {request = Sample, response = Sample})</pre>
       <p class="prose">
-        That mounts <code>/api-docs</code> — an HTML page listing every endpoint
-        with a method badge, its path, and a 🔒 on ward-guarded routes — and
-        <code>/api-docs/openapi.json</code>, a valid <strong>OpenAPI 3.0.3</strong>
-        document where each <code>:id</code> segment becomes an <code>{id}</code>
-        path parameter, methods on a shared path are grouped, and a guarded route
-        advertises a <code>401</code>. Both are built from the routes at
-        <em>request</em> time, so they always mirror what's live. What can't be
-        known without schema annotations — body shapes — is honestly omitted rather
-        than invented. Point Swagger UI, <code>openapi-generator</code>, or Insomnia
-        at the spec URL to explore or generate a client.
+        The page is <strong>interactive</strong>: each endpoint expands to a
+        <em>Try it</em> panel with inputs for its path parameters, an editable JSON
+        request body, and an <strong>Execute</strong> button that fires the request
+        <strong>from the browser</strong> — a plain same-origin <code>fetch</code> —
+        and shows the live status and response. Ward-guarded routes carry a 🔒.
+        Alongside it, <code>/api-docs/openapi.json</code> is a valid
+        <strong>OpenAPI 3.0.3</strong> document: <code>:id</code> becomes an
+        <code>{id}</code> path parameter, methods on a shared path are grouped, and a
+        guarded route advertises a <code>401</code>.
+      </p>
+      <p class="prose">
+        <code>describe</code> points a route at its Odin request/response types, and
+        Gjallarhorn reflects them into schema and example values with the <em>same
+        reflection Mímir uses</em> — a <code>Maybe(T)</code> field becomes a
+        <code>nullable</code> property, nested structs and slices recurse, and
+        property names follow a <code>json:</code> tag or the field name. It's
+        additive: an undescribed route still lists, just without a body schema, and
+        what isn't described is omitted rather than invented. Because Execute sends a
+        <em>real</em> request it passes through your middleware — a <code>POST</code>
+        behind the <code>csrf</code> rune gets the same <code>403</code> a browser
+        would — so what you see is the truth. Point Swagger UI or
+        <code>openapi-generator</code> at the spec URL too.
       </p>
     </section>
 

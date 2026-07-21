@@ -21,4 +21,13 @@ register :: proc(app: ^gh.App) {
 	gh.post(app, "/sample", create_handler)            // create from JSON body
 	gh.put(app, "/sample/:id", update_handler)         // update name by id, body
 	gh.delete(app, "/sample/:id", delete_handler)      // delete by id
+
+	// Describe the routes for the OpenAPI docs page (Config.docs). Optional — a
+	// route without a describe still lists, just without a schema. The request /
+	// response types are reflected into JSON Schema + an example body you can edit
+	// and fire from the "Try it" panel at /api-docs.
+	gh.describe(app, .Get, "/sample/:id", {summary = "Fetch one sample by id", response = Sample})
+	gh.describe(app, .Post, "/sample", {summary = "Create a sample", request = Sample, response = Sample})
+	gh.describe(app, .Put, "/sample/:id", {summary = "Update a sample's name", request = Sample, response = Sample})
+	gh.describe(app, .Delete, "/sample/:id", {summary = "Delete a sample by id"})
 }

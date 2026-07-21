@@ -333,6 +333,28 @@ Built-ins: `logger` (one leveled, structured line per request — colorized on a
 TTY, plain RFC3339 when piped), `cors` (permissive CORS + preflight `OPTIONS`
 short-circuit), `csrf` (see below), and `rate_limit`.
 
+**Observability.** Two optional runes. `request_id` tags each request with an id
+— reusing a sane inbound `X-Request-Id` (so an upstream proxy's trace carries
+through), else minting one — puts it on `b.request_id`, echoes it in the response
+header, and has `logger` print it, so a log line, the client's response, and the
+proxy trace all line up. `metrics` counts requests by status class plus in-flight
+and cumulative latency, and serves a **Prometheus** exposition at `metrics_path`
+(default `/metrics`), which it excludes from its own counts.
+
+```odin
+gh.rune(&app, gh.metrics)      // outermost — times the whole chain, serves /metrics
+gh.rune(&app, gh.request_id)   // before logger, so the id reaches the log + header
+gh.rune(&app, gh.logger)
+```
+```
+$ curl -s localhost:8091/metrics
+gjallarhorn_requests_total{status="2xx"} 128
+gjallarhorn_requests_in_flight 2
+gjallarhorn_request_duration_seconds_count 128
+```
+`/metrics` is open when the rune is registered — bind to an internal interface or
+keep it behind your proxy if it shouldn't be public.
+
 **Custom error pages.** `on_error` replaces the framework's plain-text errors
 with your own handler — the errors Gjallarhorn generates on your behalf: `404`
 (no route), `500` (a handler panicked), `403` (path traversal), and the `401` a

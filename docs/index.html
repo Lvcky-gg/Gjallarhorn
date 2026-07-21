@@ -485,9 +485,14 @@ gh.exec(w, gh.forget(w, Article{id = id}))</pre>
         <code>migrate</code> carves any missing tables and <code>ALTER</code>s in
         any new columns you've added since — additive, non-destructive, logged.
         Set <code>db_type</code> to <code>.Postgres</code>, <code>.MySQL</code>, or
-        <code>.SQLite</code> for the dialect (DDL is generated for all three;
-        <code>query</code>/<code>exec</code> run against Postgres today).
+        <code>.SQLite</code> for the dialect. DDL is generated for all three;
+        <strong>Postgres and SQLite have live drivers</strong> (SQLite is opt-in:
+        <code>-define:GJ_SQLITE=true</code>, links libsqlite3), while MySQL is
+        DDL-only for now.
       </p>
+      <pre class="code"><span class="c">// SQLite: same query/exec/scan/tx path, against a file or :memory:</span>
+app := gh.new(gh.Config{ db_type = .SQLite, sqlite = <span class="s">"app.db"</span> })
+<span class="c">// odin build . -define:GJ_SQLITE=true</span></pre>
       <div class="note">
         <strong>Offline by design.</strong> Leave <code>dbname</code> empty and
         Mímir stays out of the water — migrations print their DDL instead of

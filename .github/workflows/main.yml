@@ -51,6 +51,13 @@ jobs:
       - name: Test (against the postgres service on 127.0.0.1:5432)
         run: odin test ./tests
 
+      # The SQLite backend is opt-in (-define:GJ_SQLITE=true) and links
+      # libsqlite3; a second run actually exercises it (the default run skips it).
+      - name: Test the SQLite backend
+        run: |
+          sudo apt-get update && sudo apt-get install -y libsqlite3-dev
+          odin test ./tests -define:GJ_SQLITE=true
+
   deploy-aur:
     needs: test
     runs-on: ubuntu-latest

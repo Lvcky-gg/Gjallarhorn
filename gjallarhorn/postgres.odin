@@ -75,14 +75,24 @@ failed :: proc(rows: Pg_Rows) -> bool {
 }
 
 connect :: proc(app: ^App) -> bool {
+	if app.db_type == .SQLite {
+		return sqlite_open(app)
+	}
 	return pool_open(&app.pool, app.postgres, app.pool_size)
 }
 
 disconnect :: proc(app: ^App) {
+	if app.db_type == .SQLite {
+		sqlite_close(app)
+		return
+	}
 	pool_close(&app.pool)
 }
 
 exec :: proc(w: Well, stmt: Statement) -> bool {
+	if w.app != nil && w.app.db_type == .SQLite {
+		return sqlite_exec(w.app, stmt, w.sqlite_locked)
+	}
 	conn, release, ok := well_conn(w)
 	if !ok {
 		return false
@@ -95,6 +105,9 @@ exec :: proc(w: Well, stmt: Statement) -> bool {
 }
 
 query_well :: proc(w: Well, stmt: Statement, allocator := context.temp_allocator) -> (Pg_Rows, bool) {
+	if w.app != nil && w.app.db_type == .SQLite {
+		return sqlite_query(w.app, stmt, w.sqlite_locked, allocator)
+	}
 	conn, release, ok := well_conn(w)
 	if !ok {
 		return {}, false

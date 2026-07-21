@@ -29,7 +29,14 @@ run :: proc(app: ^App) {
 	}
 
 	pretty := stream_color(.Info)
-	if app.postgres.dbname != "" && !app.pool.open {
+	if app.db_type == .SQLite && app.sqlite == nil {
+		path := app.sqlite_path == "" ? ":memory:" : app.sqlite_path
+		if connect(app) {
+			fmt.printfln("%s  opened sqlite %s", paint(pretty, "\e[1;34m", "mimir"), path)
+		} else {
+			logft(.Warn, "mimir", "sqlite unavailable — migrations will print only")
+		}
+	} else if app.postgres.dbname != "" && !app.pool.open {
 		if connect(app) {
 			fmt.printfln(
 				"%s  connected to postgres %s/%s (pool of %d)",

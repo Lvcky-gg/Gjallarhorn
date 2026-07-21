@@ -1,6 +1,7 @@
 package gjallarhorn
 
 import "core:os"
+import "core:sync"
 
 // app.odin — the application object and its construction.
 //
@@ -77,6 +78,7 @@ Config :: struct {
 	port:      int,
 	db_type:   DB_Type,
 	postgres:  Postgres_Config,
+	sqlite:    string, // SQLite DB file path (or ":memory:"); with db_type = .SQLite
 	max_body:  int,    // largest request body accepted; 0 -> DEFAULT_MAX_BODY
 	pool_size: int,    // DB connections to pool; 0 -> DEFAULT_POOL_SIZE
 	workers:   int,    // worker-pool size; 0 -> core-relative default (see default_workers)
@@ -98,6 +100,9 @@ App :: struct {
 	tls_cert:   string,      // PEM cert chain path; with tls_key, serves HTTPS (GH-054)
 	tls_key:    string,      // PEM private key path
 	tls_ctx:    rawptr,      // OpenSSL SSL_CTX* built at startup; nil for plain HTTP
+	sqlite_path: string,     // SQLite DB file (or ":memory:"); see sqlite.odin
+	sqlite:      rawptr,     // open sqlite3* handle; nil until connect() (GJ_SQLITE build)
+	sqlite_mu:   sync.Mutex, // guards the single SQLite connection across workers
 	postgres:   Postgres_Config,
 	pool:       Pg_Pool,     // DB connections; pool.open is false until connect()
 	models:     [dynamic]typeid, // shapes Mimir remembers + migrates at startup
@@ -134,5 +139,6 @@ new :: proc(cfg: Config) -> App {
 		tls_cert  = cfg.tls_cert,
 		tls_key   = cfg.tls_key,
 		postgres  = cfg.postgres,
+		sqlite_path = cfg.sqlite,
 	}
 }

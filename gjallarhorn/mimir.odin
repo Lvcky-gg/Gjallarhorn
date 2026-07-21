@@ -42,9 +42,10 @@ Json :: distinct string
 
 
 Well :: struct {
-	dialect: DB_Type,
-	app:     ^App,
-	conn:    ^Pg_Conn, // pinned connection for a transaction; nil => pool per call
+	dialect:       DB_Type,
+	app:           ^App,
+	conn:          ^Pg_Conn, // pinned connection for a transaction; nil => pool per call
+	sqlite_locked: bool,     // SQLite tx already holds app.sqlite_mu; don't re-lock
 }
 
 well :: proc{well_from_app, well_from_bifrost}
@@ -253,6 +254,18 @@ migrate :: proc(app: ^App) {
 		len(app.models),
 		w.dialect,
 	)
+
+	// SQLite: a separate live path (no pg pool). migrate over the single handle.
+	if app.db_type == .SQLite {
+		if app.sqlite != nil {
+			sqlite_migrate(app)
+		} else {
+			for m in app.models {
+				fmt.println(paint(pretty, ANSI_DIM, carve(w, m)))
+			}
+		}
+		return
+	}
 
 	// Offline (no connection): just print the CREATE DDL as before — there's no
 	// live schema to diff against. Dimmed, since it's a preview rather than a run.
@@ -743,7 +756,13 @@ Tx_Body :: proc(w: Well) -> bool
 //	    return a && b // either insert failing rolls back both
 //	})
 tx :: proc(w: Well, body: Tx_Body) -> bool {
-	if w.app == nil || !w.app.pool.open {
+	if w.app == nil {
+		return false
+	}
+	if w.app.db_type == .SQLite {
+		return sqlite_tx(w.app, w, body)
+	}
+	if !w.app.pool.open {
 		return false
 	}
 	conn, ok := pool_acquire(&w.app.pool)

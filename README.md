@@ -186,6 +186,7 @@ verb next to its logic.
 | `loom/` | Loom, the template engine (package `loom`) |
 | `mimir.odin` | Mímir, the ORM (writes *and* reads — `scan` hydrates rows into structs) |
 | `postgres.odin` | a from-scratch PostgreSQL v3 wire-protocol client (SCRAM auth, pooling) |
+| `sqlite.odin` | optional live SQLite backend (opt-in `-define:GJ_SQLITE=true`, links libsqlite3) |
 | `tls.odin` | optional OpenSSL TLS for the DB connection and the HTTP server (opt-in) |
 | `cli/` | the `gjallarhorn` CLI: `new`, `generate resource`, and `bench` (load generator) |
 
@@ -558,7 +559,26 @@ ok := gh.tx(w, proc(w: gh.Well) -> bool {
 value is a bound parameter (`$1..` for Postgres, `?` otherwise).
 
 Set `db_type` to `.Postgres`, `.MySQL`, or `.SQLite`. DDL is generated for all
-three; the live driver today is Postgres (see limitations).
+three; **Postgres and SQLite have live drivers**, MySQL is DDL-only for now.
+
+### SQLite — an opt-in embedded backend
+
+SQLite runs the same `query`/`exec`/`scan`/`tx` path against a local file (or
+`:memory:`). It links the system **libsqlite3**, so — like TLS — it's opt-in
+behind a build flag, keeping the default build dependency-free:
+
+```odin
+app := gh.new(gh.Config{ db_type = .SQLite, sqlite = "app.db" }) // or ":memory:"
+```
+```sh
+odin build . -define:GJ_SQLITE=true    # links libsqlite3
+```
+
+Mímir already emits SQLite DDL and `?` placeholders, and `scan` reads text
+cells, so the backend just opens a (serialized, mutex-guarded) connection, binds
+arguments as text, and marshals rows into the same shape Postgres returns —
+including the NULL-vs-empty distinction and transactions. A default build without
+the flag fails loudly if you select `.SQLite`.
 
 ### Postgres — a hand-rolled wire client
 
@@ -875,7 +895,7 @@ panic recovery; cookies and HMAC-signed sessions with server-enforced expiry;
 **CSRF** protection, per-client **rate limiting**, custom **error pages**, **Wards** (per-route auth
 guards) with `login`/`logout`/`current_user`, and **Argon2id password hashing**; the ORM's full read/write/transaction path with struct hydration
 over `int`/`float`/`bool`/`string`, `time.Time`, `uuid`, `bytea`, `JSONB`, and
-`Maybe(T)` nullables; SCRAM-SHA-256 auth; connection pooling; optional TLS on
+`Maybe(T)` nullables; SCRAM-SHA-256 auth; connection pooling; an optional live SQLite backend; optional TLS on
 both the DB connection and the HTTP server; static-file caching (ETag /
 Last-Modified / conditional `304`) and precompressed `gzip_static`; template
 inheritance, includes, macros, whitespace control, the compiled-node cache, and
@@ -884,8 +904,9 @@ that tests and publishes to the AUR on every push to `main`.
 
 **Known gaps**, in rough order of impact:
 
-- **Postgres-only in practice.** MySQL and SQLite generate DDL but have no live
-  driver yet, so `query`/`exec` only run against Postgres.
+- **MySQL has no live driver.** All three dialects generate DDL, and **SQLite is
+  a live backend** (opt-in: `-define:GJ_SQLITE=true`, links libsqlite3); MySQL
+  still generates DDL only, so `query`/`exec` don't run against it yet.
 - **Keep-alive holds a worker.** Concurrency is bounded (`Config.workers`,
   default 256) rather than unbounded, but a slow client still occupies its worker
   for the connection's life — size the pool accordingly.

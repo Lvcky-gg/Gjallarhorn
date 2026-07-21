@@ -28,6 +28,14 @@ main :: proc() {
 			user = "app", password = "secret", dbname = "gjallarhorn",
 		},
 		secret = "asdwASDWdadndaoiwdjkasdwe",
+		// Opt-in OpenAPI docs: a Loom-woven page at /api-docs listing every route,
+		// plus /api-docs/openapi.json. Flip enabled to false to turn it all off.
+		docs = gh.Docs_Config{
+			enabled     = true,
+			title       = "Gjallarhorn Sample API",
+			version     = "1.0.1",
+			description = "The sample app's routes, described straight from the router.",
+		},
 	})
 
 	// Middleware is registered with rune, in onion order. csrf guards unsafe

@@ -73,6 +73,19 @@ default_workers :: proc() -> int {
 // start on it in release builds (see server.odin).
 DEFAULT_SECRET :: "gjallarhorn-insecure-default-key"
 
+// Docs_Config turns on a self-describing OpenAPI page, woven by Loom from the
+// routes the router already knows. The zero value is off, so it costs nothing
+// until asked for — flip `enabled` and a live docs UI plus an `openapi.json`
+// spec appear, generated from `app.routes` at request time (always current).
+// See openapi.odin.
+Docs_Config :: struct {
+	enabled:     bool,   // off by default; true mounts the docs UI + spec
+	path:        string, // where to mount the UI; empty -> "/api-docs"
+	title:       string, // API title shown on the page + in the spec; empty -> "Gjallarhorn API"
+	version:     string, // API version string; empty -> "0.1.0"
+	description: string, // optional blurb shown under the title
+}
+
 Config :: struct {
 	host:      string, // bind address, e.g. "0.0.0.0"; empty -> loopback
 	port:      int,
@@ -83,6 +96,7 @@ Config :: struct {
 	pool_size: int,    // DB connections to pool; 0 -> DEFAULT_POOL_SIZE
 	workers:   int,    // worker-pool size; 0 -> core-relative default (see default_workers)
 	secret:    string, // key signing session cookies; empty -> DEFAULT_SECRET
+	docs:      Docs_Config, // opt-in OpenAPI docs page (see openapi.odin); off by default
 	// HTTPS (GH-054): set both to serve TLS instead of plaintext HTTP. PEM files.
 	// Requires a TLS build (-define:GJ_TLS=true); otherwise startup fails loudly.
 	tls_cert:  string, // path to the PEM certificate chain
@@ -100,6 +114,7 @@ App :: struct {
 	tls_cert:   string,      // PEM cert chain path; with tls_key, serves HTTPS (GH-054)
 	tls_key:    string,      // PEM private key path
 	tls_ctx:    rawptr,      // OpenSSL SSL_CTX* built at startup; nil for plain HTTP
+	docs:       Docs_Config, // opt-in OpenAPI docs page; see openapi.odin
 	sqlite_path: string,     // SQLite DB file (or ":memory:"); see sqlite.odin
 	sqlite:      rawptr,     // open sqlite3* handle; nil until connect() (GJ_SQLITE build)
 	sqlite_mu:   sync.Mutex, // guards the single SQLite connection across workers
@@ -138,6 +153,7 @@ new :: proc(cfg: Config) -> App {
 		secret    = cfg.secret,
 		tls_cert  = cfg.tls_cert,
 		tls_key   = cfg.tls_key,
+		docs      = cfg.docs,
 		postgres  = cfg.postgres,
 		sqlite_path = cfg.sqlite,
 	}

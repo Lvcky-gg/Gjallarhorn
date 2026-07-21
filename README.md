@@ -174,6 +174,7 @@ verb next to its logic.
 | `body.odin` | request-body decoders: `bind_json`, `form`, query/percent decoding |
 | `multipart.odin` | `multipart/form-data` parsing: `files` / `upload` |
 | `fetch.odin` | outbound HTTP(S) client — `fetch` / `fetch_json` to call other APIs |
+| `openapi.odin` | opt-in OpenAPI docs page (Loom-woven) + `openapi.json`, from the route table |
 | `response.odin` | writing HTTP/1.1 responses |
 | `session.odin` | signed-cookie sessions + `cookie` / `set_cookie` |
 | `auth.odin` | `login` / `logout` / `current_user` and the `require_login` Ward |
@@ -773,6 +774,43 @@ without it, an https fetch fails fast rather than falling back to plaintext.
 
 ---
 
+### OpenAPI docs — a self-describing API
+
+Flip one config flag and Gjallarhorn serves a docs page — **woven by Loom** — plus
+an `openapi.json` document, both generated from the route table the router already
+holds. Nothing to annotate and nothing to keep in sync: register a route and it
+appears; it's off by default, so a public app pays nothing until it opts in.
+
+```odin
+app := gh.new(gh.Config{
+    port = 8091,
+    docs = gh.Docs_Config{
+        enabled     = true,               // off by default
+        title       = "My API",           // shown on the page + in the spec
+        version     = "1.2.0",
+        description = "What this service does.",
+        // path     = "/api-docs",        // where to mount (this is the default)
+    },
+})
+```
+
+That mounts two GET routes:
+
+- **`/api-docs`** — an HTML page listing every endpoint with a method badge, its
+  path, and a 🔒 marker on ward-guarded routes. It's a Loom template carried in the
+  binary (inline CSS, no external assets).
+- **`/api-docs/openapi.json`** — a minimal, valid **OpenAPI 3.0.3** document. Each
+  route's `:id` segments become `{id}` path parameters, methods on a shared path are
+  grouped, and a guarded route advertises a `401`.
+
+Both are built from `app.routes` at *request* time, so they always mirror the live
+routes. What can't be known without schema annotations — request/response body
+shapes — is honestly omitted rather than invented, in keeping with the rest of the
+framework. Point any OpenAPI tool (Swagger UI, `openapi-generator`, Insomnia) at
+the `openapi.json` URL to explore or generate a client.
+
+---
+
 ## TLS / HTTPS
 
 TLS is **opt-in at build time**. Odin ships no TLS in `core` or `vendor`, so
@@ -944,7 +982,7 @@ over `int`/`float`/`bool`/`string`, `time.Time`, `uuid`, `bytea`, `JSONB`, and
 both the DB connection and the HTTP server; static-file caching (ETag /
 Last-Modified / conditional `304`) and precompressed `gzip_static`; template
 inheritance, includes, macros, whitespace control, the compiled-node cache, and
-direct struct rendering; leveled/structured logging with request IDs and a Prometheus /metrics endpoint; an outbound HTTP(S) client for calling other APIs; a scaffolding CLI; and CI
+direct struct rendering; leveled/structured logging with request IDs and a Prometheus /metrics endpoint; an outbound HTTP(S) client for calling other APIs; an opt-in Loom-woven OpenAPI docs page + `openapi.json`; a scaffolding CLI; and CI
 that tests and publishes to the AUR on every push to `main`.
 
 **Known gaps**, in rough order of impact:

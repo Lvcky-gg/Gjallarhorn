@@ -50,6 +50,11 @@ run :: proc(app: ^App) {
 		}
 	}
 
+	// Mount the OpenAPI docs page + spec if Config.docs.enabled. Done here, after
+	// the app's own routes are all registered, so the spec (built from app.routes
+	// at request time) sees the full route table.
+	mount_docs(app)
+
 	migrate(app)
 
 	endpoint := net.Endpoint {

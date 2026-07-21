@@ -22,6 +22,7 @@ Bifrost :: struct {
 	ssl:         rawptr, // TLS session when serving HTTPS; nil for plaintext (GH-054)
 	written:     bool,
 	status:      int,               // final response status, recorded by write_response (for logging)
+	request_id:  string,            // per-request id set by the request_id rune (empty if not used)
 	keep_alive:  bool,              // reuse the socket after this response
 	omit_body:   bool,              // write headers only, no payload — set for HEAD (RFC 7231 §4.3.2)
 

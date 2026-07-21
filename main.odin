@@ -32,6 +32,11 @@ main :: proc() {
 
 	// Middleware is registered with rune, in onion order. csrf guards unsafe
 	// methods: GET /pages/form.html seeds a token, POST /submit requires it.
+	// Observability: metrics outermost (times the whole chain and serves
+	// /metrics), then request_id (before logger, so the id reaches the log line
+	// and the X-Request-Id response header).
+	gh.rune(&app, gh.metrics)
+	gh.rune(&app, gh.request_id)
 	gh.rune(&app, gh.logger)
 	gh.rune(&app, gh.cors)
 	// Per-client token bucket: bursts pass, sustained excess gets 429 +

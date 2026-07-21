@@ -114,23 +114,28 @@ logger :: proc(b: ^Bifrost, next: Next) {
 
 	level := log_level_for_status(b.status)
 	ip := client_ip(b) // the peer, or X-Forwarded-For when trusted (see ratelimit.odin)
+	// The request id (if the request_id rune is in the chain) ties this line to
+	// the response header and any upstream trace.
+	rid := b.request_id != "" ? fmt.tprintf("  %s", b.request_id) : ""
 	if stream_color(level) {
 		// Pretty (TTY): bold-cyan method, status colored by class, dim client + dur —
 		// aligned so a column of requests scans cleanly.
 		method := paint(true, "\e[1;36m", fmt.tprintf("%-6v", b.method))
 		status := paint(true, status_sgr(b.status), fmt.tprintf("%d", b.status))
-		meta := paint(true, ANSI_DIM, fmt.tprintf("%s  %.2fms", ip, dur_ms))
+		meta := paint(true, ANSI_DIM, fmt.tprintf("%s  %.2fms%s", ip, dur_ms, rid))
 		logf(level, "%s %s  %s  %s", method, status, b.path, meta)
 	} else {
 		// Plain (piped): structured key=value the stable format keeps greppable.
+		id_field := b.request_id != "" ? fmt.tprintf(" id=%s", b.request_id) : ""
 		logf(
 			level,
-			"method=%v path=%q status=%d ip=%s dur_ms=%.3f",
+			"method=%v path=%q status=%d ip=%s dur_ms=%.3f%s",
 			b.method,
 			b.path,
 			b.status,
 			ip,
 			dur_ms,
+			id_field,
 		)
 	}
 }

@@ -1,5 +1,7 @@
 package gjallarhorn
 
+import "core:os"
+
 // app.odin — the application object and its construction.
 //
 // Gjallarhorn is split across several files, all `package gjallarhorn` (Odin
@@ -46,10 +48,23 @@ Ssl_Mode :: enum {
 DEFAULT_MAX_BODY :: 1 << 20 // 1 MiB
 // DEFAULT_POOL_SIZE is the connection-pool size when Config.pool_size is zero.
 DEFAULT_POOL_SIZE :: 4
-// DEFAULT_WORKERS is the size of the connection worker pool when Config.workers
-// is left zero — the cap on concurrent connections (each holds one worker for its
-// lifetime), so a connection flood can't spawn unbounded threads (see server.odin).
-DEFAULT_WORKERS :: 256
+// DEFAULT_WORKERS is the fallback worker-pool size if core detection fails.
+DEFAULT_WORKERS :: 128
+
+// default_workers sizes the connection worker pool relative to the machine when
+// Config.workers is left zero. Each connection holds a worker for its lifetime,
+// so the pool both caps concurrency (no unbounded thread spawn) and sets the
+// ceiling on concurrent connections. Benchmarking (see the repo's `bench`) found
+// oversubscription costs throughput — 256 workers ran ~3× slower than 64 at high
+// load on an 8-core box — so we scale with cores instead of a fixed 256, clamped
+// to a sane range. Set Config.workers to override for your traffic shape.
+default_workers :: proc() -> int {
+	cores := os.get_processor_core_count()
+	if cores <= 0 {
+		return DEFAULT_WORKERS
+	}
+	return clamp(cores * 16, 16, 256)
+}
 
 // DEFAULT_SECRET signs session cookies when Config.secret is left empty. It is a
 // fixed, public string — fine for local dev, useless for security. Set a real
@@ -64,7 +79,7 @@ Config :: struct {
 	postgres:  Postgres_Config,
 	max_body:  int,    // largest request body accepted; 0 -> DEFAULT_MAX_BODY
 	pool_size: int,    // DB connections to pool; 0 -> DEFAULT_POOL_SIZE
-	workers:   int,    // max concurrent connections (worker threads); 0 -> DEFAULT_WORKERS
+	workers:   int,    // worker-pool size; 0 -> core-relative default (see default_workers)
 	secret:    string, // key signing session cookies; empty -> DEFAULT_SECRET
 	// HTTPS (GH-054): set both to serve TLS instead of plaintext HTTP. PEM files.
 	// Requires a TLS build (-define:GJ_TLS=true); otherwise startup fails loudly.
@@ -104,7 +119,7 @@ new :: proc(cfg: Config) -> App {
 	}
 	workers := cfg.workers
 	if workers <= 0 {
-		workers = DEFAULT_WORKERS
+		workers = default_workers()
 	}
 	// The insecure-default-secret check lives at start time (run), not here, so
 	// tests can construct an App without a secret. See run() in server.odin.

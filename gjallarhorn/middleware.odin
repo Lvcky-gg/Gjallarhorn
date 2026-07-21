@@ -113,15 +113,24 @@ logger :: proc(b: ^Bifrost, next: Next) {
 	dur_ms := time.duration_milliseconds(time.tick_diff(start, time.tick_now()))
 
 	level := log_level_for_status(b.status)
+	ip := client_ip(b) // the peer, or X-Forwarded-For when trusted (see ratelimit.odin)
 	if stream_color(level) {
-		// Pretty (TTY): bold-cyan method, status colored by class, dim duration —
+		// Pretty (TTY): bold-cyan method, status colored by class, dim client + dur —
 		// aligned so a column of requests scans cleanly.
 		method := paint(true, "\e[1;36m", fmt.tprintf("%-6v", b.method))
 		status := paint(true, status_sgr(b.status), fmt.tprintf("%d", b.status))
-		dur := paint(true, ANSI_DIM, fmt.tprintf("%.2fms", dur_ms))
-		logf(level, "%s %s  %s  %s", method, status, b.path, dur)
+		meta := paint(true, ANSI_DIM, fmt.tprintf("%s  %.2fms", ip, dur_ms))
+		logf(level, "%s %s  %s  %s", method, status, b.path, meta)
 	} else {
 		// Plain (piped): structured key=value the stable format keeps greppable.
-		logf(level, "method=%v path=%q status=%d dur_ms=%.3f", b.method, b.path, b.status, dur_ms)
+		logf(
+			level,
+			"method=%v path=%q status=%d ip=%s dur_ms=%.3f",
+			b.method,
+			b.path,
+			b.status,
+			ip,
+			dur_ms,
+		)
 	}
 }

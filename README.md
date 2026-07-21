@@ -792,12 +792,12 @@ the chain is exhausted `dispatch_route` matches a route (or a static/template
 mount), runs its Ward if it has one, and calls the handler — which writes the
 response back through the same Bifrost.
 
-**Concurrency.** `run()` starts a fixed pool of `Config.workers` threads (default
-`256`), each accepting on the shared listening socket, so a connection flood
-can't spawn unbounded threads. Excess connections wait in the kernel backlog.
-Each worker owns its own temp allocator, reset per request. (See
-[Performance](#performance--and-should-it-be-an-event-loop) — `256` is generous;
-on a small box a lower count is often faster.)
+**Concurrency.** `run()` starts a fixed pool of `Config.workers` threads, each
+accepting on the shared listening socket, so a connection flood can't spawn
+unbounded threads. Excess connections wait in the kernel backlog. Each worker
+owns its own temp allocator, reset per request. The default is **core-relative**
+(`cores × 16`, clamped to `[16, 256]`) — the benchmark below showed a fixed 256
+oversubscribes small boxes. Override with `Config.workers` for your traffic.
 
 **Shutdown.** `SIGINT`/`SIGTERM` flip a shutdown flag: workers stop accepting,
 finish the request in flight, and decline to read another on a kept-alive
@@ -826,8 +826,8 @@ gjallarhorn bench hold http://127.0.0.1:8091/ -c 60 -d 14   # pin 60 workers idl
   reopens the connection (accept + handshake + thread dispatch dominate).
 - **Oversubscription has a cliff.** At 200 clients, 16–64 workers gave ~360k
   req/s; **256 workers gave only ~126k** (p99 6 ms) — too many threads thrash. The
-  sweet spot tracks core count, so the `256` default is high for small boxes; set
-  `Config.workers` (or `GJ_WORKERS`) to roughly a small multiple of your cores.
+  sweet spot tracks core count, which is why the default `Config.workers` is now
+  `cores × 16` (clamped `[16, 256]`) rather than a flat 256.
 - **Idle keep-alive connections are the real limit (head-of-line).** Holding 60 of
   64 workers with idle-but-open connections cut throughput for everyone else
   ~2.6× (350k → 137k); hold *all* of them and new clients wait in the kernel

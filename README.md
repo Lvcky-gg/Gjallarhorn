@@ -1091,6 +1091,22 @@ users.register(&app)   // remembers the model + registers GET/POST/PUT/DELETE
 That gives you `GET /users/:id`, `POST /users`, `PUT /users/:id`,
 `DELETE /users/:id` — edit `users/model.odin` to shape the table.
 
+### `gh docs [topic]` — browse the docs in your terminal
+
+A self-contained terminal UI (raw-mode termios + ANSI, no dependencies) that walks
+the whole framework by topic — Mímir, Loom, the runes, sessions, fetch, and the
+rest — as a two-pane table: topics on the left, detail on the right.
+
+```sh
+./gh docs                 # open the browser
+./gh docs loom            # jump straight to a topic (prefix match)
+./gh docs --plain         # dump every topic as text (piping / no TTY)
+```
+
+Navigate with `↑`/`↓` or `j`/`k`, page the detail with `space`/`b`, `g`/`G` for
+top/end, `q` to quit. When stdout isn't a terminal it falls back to the plain-text
+dump automatically, so `gh docs | less` and `gh docs > DOCS.txt` just work.
+
 ## Project layout
 
 ```

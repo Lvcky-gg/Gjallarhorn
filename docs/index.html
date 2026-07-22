@@ -718,6 +718,15 @@ gjallarhorn generate resource users   <span class="c"># -> users/{model,controll
         <code>gjallarhorn bench load http://127.0.0.1:8091/ -c 50 -d 5</code> —
         a self-contained generator reporting req/s and latency percentiles.
       </p>
+      <p class="prose">
+        And it documents itself: <code>gjallarhorn docs</code> opens a
+        <strong>terminal UI</strong> (raw-mode termios + ANSI, no dependencies) that
+        browses the whole framework by topic — Mímir, Loom, the runes, sessions,
+        fetch — as a two-pane table. <code>gjallarhorn docs loom</code> jumps to a
+        topic; <code>gjallarhorn docs --plain</code> dumps text for piping. Arrows or
+        <code>j</code>/<code>k</code> move, <code>space</code>/<code>b</code> page,
+        <code>q</code> quits.
+      </p>
     </section>
 
     <!-- INSTALL -->

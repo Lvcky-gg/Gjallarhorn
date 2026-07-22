@@ -53,6 +53,9 @@ main :: proc() {
 			os.exit(1)
 		}
 		os.exit(run_bench(args[1:]))
+	case "docs":
+		// Browse the framework docs by topic in a terminal UI. See docs.odin.
+		os.exit(run_docs(args[1:]))
 	case "help", "-h", "--help":
 		usage()
 	case:
@@ -69,6 +72,7 @@ usage :: proc() {
 	fmt.println("  gh new <app>                  scaffold a new, runnable app (vendors the library)")
 	fmt.println("  gh generate resource <name>   scaffold a CRUD resource package (alias: g res)")
 	fmt.println("  gh bench <load|hold> <url>    load-test a running app (-c N -d SECONDS -close)")
+	fmt.println("  gh docs [topic]               browse the framework docs in a terminal UI")
 	fmt.println("  gh help                       show this help")
 	fmt.println("")
 	fmt.println("Examples:")

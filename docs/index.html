@@ -696,14 +696,16 @@ gh.describe(&amp;app, .Post, <span class="s">"/sample"</span>, {request = Sample
         The <code>gjallarhorn</code> command bootstraps projects and generates
         code. <code>new</code> scaffolds a runnable app — a minimal
         <code>main.odin</code>, a <code>docker-compose.yml</code>, and a vendored
-        copy of the framework — so <code>odin run .</code> works immediately.
+        copy of the framework — so it runs immediately.
+        <code>run</code> and <code>build</code> wrap <code>odin run .</code> /
+        <code>odin build .</code> from the app's directory (flags forwarded).
         <code>generate resource</code> writes a full CRUD trio
         (<code>model</code> + <code>controller</code> + <code>routes</code>)
         mirroring <code>./sample</code>.
       </p>
       <pre class="code"><span class="c"># bootstrap a new, runnable app</span>
 gjallarhorn new blog
-cd blog &amp;&amp; odin run .            <span class="c"># -> http://127.0.0.1:8091/hello/world</span>
+cd blog &amp;&amp; gjallarhorn run       <span class="c"># = odin run .  -> http://127.0.0.1:8091</span>
 
 <span class="c"># add a CRUD resource (alias: g res). Name is plural; the model is singular.</span>
 gjallarhorn generate resource users   <span class="c"># -> users/{model,controller,routes}.odin</span></pre>

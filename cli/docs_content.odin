@@ -378,7 +378,12 @@ doc_topics :: proc() -> []Topic {
 			{
 				"# Scaffold a project",
 				"  gjallarhorn new blog        // blog/ with main.odin + vendored gjallarhorn/",
-				"  cd blog && odin run .",
+				"  cd blog && gjallarhorn run  // = odin run .  (serves on :8091)",
+				"",
+				"# Run or build the app here",
+				"  gjallarhorn run                     // odin run .",
+				"  gjallarhorn run -define:GJ_TLS=true // flags are forwarded to odin",
+				"  gjallarhorn build -out:app          // odin build . -out:app",
 				"",
 				"# Scaffold a CRUD resource",
 				"  gjallarhorn generate resource users   // users/{model,controller,routes}.odin",

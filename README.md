@@ -1054,6 +1054,27 @@ odin build cli -out:gh          # or run inline: odin run cli -- <args>
 
 (Examples below use `gh`; substitute `gjallarhorn` when installed from the AUR.)
 
+### `gh run` — build + run the app here
+
+A convenience wrapper for `odin run .`: run it from your project root to compile
+and start the app (it `exec`s the compiler, so stdio and Ctrl-C behave exactly as
+if you'd typed `odin run .`). Extra flags are forwarded.
+
+```sh
+./gh run                        # odin run .  -> serves on :8091
+./gh run -define:GJ_TLS=true    # forwards flags to the compiler
+```
+
+### `gh build` — compile the app here
+
+The same wrapper over `odin build .` — produces a binary without running it. Flags
+are forwarded, so `-out:`, `-o:speed`, `-define:…` all work.
+
+```sh
+./gh build -out:app             # odin build . -out:app
+./gh build -o:speed             # optimised release build
+```
+
 ### `gh new <app>` — a whole new app
 
 Scaffolds a new, **immediately runnable** project — a minimal `main.odin`, a

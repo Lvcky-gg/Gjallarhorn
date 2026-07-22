@@ -53,6 +53,14 @@ main :: proc() {
 			os.exit(1)
 		}
 		os.exit(run_bench(args[1:]))
+	case "run":
+		// Build + run the app in the current directory: `odin run .` with any extra
+		// flags forwarded. Replaces this process with the compiler. See run.odin.
+		os.exit(run_app(args[1:]))
+	case "build":
+		// Compile the app in the current directory: `odin build .` with any extra
+		// flags forwarded (e.g. -out:app, -o:speed). See run.odin.
+		os.exit(build_app(args[1:]))
 	case "docs":
 		// Browse the framework docs by topic in a terminal UI. See docs.odin.
 		os.exit(run_docs(args[1:]))
@@ -70,6 +78,8 @@ usage :: proc() {
 	fmt.println("")
 	fmt.println("Usage:")
 	fmt.println("  gh new <app>                  scaffold a new, runnable app (vendors the library)")
+	fmt.println("  gh run [flags]                build + run the app here (odin run . [flags])")
+	fmt.println("  gh build [flags]              compile the app here (odin build . [flags])")
 	fmt.println("  gh generate resource <name>   scaffold a CRUD resource package (alias: g res)")
 	fmt.println("  gh bench <load|hold> <url>    load-test a running app (-c N -d SECONDS -close)")
 	fmt.println("  gh docs [topic]               browse the framework docs in a terminal UI")
@@ -77,6 +87,7 @@ usage :: proc() {
 	fmt.println("")
 	fmt.println("Examples:")
 	fmt.println("  gh new blog                   -> blog/ with main.odin + gjallarhorn/ vendored")
+	fmt.println("  gh run                        -> odin run .  (start the app on :8091)")
 	fmt.println("  gh generate resource users    -> users/{model,controller,routes}.odin")
 	fmt.println("  gh bench load http://127.0.0.1:8091/ -c 50 -d 5")
 }

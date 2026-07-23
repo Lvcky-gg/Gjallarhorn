@@ -1,15 +1,18 @@
 name: npm-publish
 
-# Publish the `gjallarhorn` CLI to npm when a version tag is pushed (e.g. v0.1.0).
+# Publish the `gjallarhorn` CLI to npm when a version tag is pushed. The version is
+# taken straight from the tag, so you never hand-edit package.json — just tag and
+# push. Bare semver (1.0.4) and v-prefixed (v1.0.4) tags both work:
+#
+#     git tag 1.0.4 && git push origin 1.0.4
+#
 # Separate from main.yml (which tests every push and deploys the AUR): npm releases
-# are deliberate and tag-driven. The easiest way to cut one:
-#
-#     npm version patch          # bumps package.json, commits, and tags vX.Y.Z
-#     git push --follow-tags     # pushes the commit (-> AUR) and the tag (-> npm)
-#
+# are deliberate and tag-driven.
 on:
   push:
-    tags: ['v*']
+    tags:
+      - '[0-9]*'   # bare semver, your convention: 1.0.4, 1.0.4-beta.1
+      - 'v[0-9]*'  # v-prefixed also accepted: v1.0.4
   workflow_dispatch: {}
 
 permissions:
@@ -39,17 +42,6 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Tag must match package.json version
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: |
-          tag="${GITHUB_REF_NAME#v}"
-          pkg="$(node -p "require('./package.json').version")"
-          if [ "$tag" != "$pkg" ]; then
-            echo "::error::tag $GITHUB_REF_NAME does not match package.json version $pkg — bump package.json first"
-            exit 1
-          fi
-          echo "publishing version $pkg"
-
       # Pack the real tarball, install it into a throwaway project, and drive the
       # CLI end to end — so a broken package is caught before it reaches npm.
       - name: Smoke test the package
@@ -63,6 +55,16 @@ jobs:
           "$gh" docs --plain >/dev/null
           ( cd "$tmp" && "$gh" new demoapp && cd demoapp && odin build . -o:minimal -out:/tmp/demoapp )
           echo "smoke test passed"
+
+      # The published version comes from the tag (strip an optional leading "v"),
+      # so package.json never has to be bumped by hand. workflow_dispatch (no tag)
+      # publishes package.json's current version as-is.
+      - name: Set version from the tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          echo "publishing $(node -p "require('./package.json').name")@$ver (tag: $GITHUB_REF_NAME)"
+          npm version "$ver" --no-git-tag-version --allow-same-version
 
       - name: Publish to npm (with provenance)
         run: npm publish --provenance --access public

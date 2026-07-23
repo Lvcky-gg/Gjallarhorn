@@ -11,11 +11,24 @@ package main
 // When stdout isn't a terminal it falls back to the plain dump automatically, so
 // `gjallarhorn docs | less` and `… > DOCS.txt` just work.
 
+import "core:c"
 import "core:fmt"
 import "core:os"
 import "core:strings"
-import "core:sys/linux"
 import "core:sys/posix"
+
+// Terminal size comes from a TIOCGWINSZ ioctl. core:sys/posix has no ioctl, and
+// core:sys/linux is Linux-only, so we bind libc's ioctl directly — that keeps the
+// docs TUI building on macOS/BSD (Homebrew) as well as Linux. The request constant
+// differs by OS.
+foreign import libc "system:c"
+
+@(default_calling_convention = "c")
+foreign libc {
+	ioctl :: proc(fd: c.int, request: c.ulong, arg: rawptr) -> c.int ---
+}
+
+TIOCGWINSZ :: 0x5413 when ODIN_OS == .Linux else 0x40087468 // Linux vs Darwin/BSD
 
 // Topic is one entry in the table: a name, a one-line tagline, and body lines.
 // A body line starting with "# " is a section header; "  " (two spaces) is a code
@@ -173,15 +186,13 @@ term_size :: proc() -> (rows, cols: int) {
 		ws_row, ws_col, ws_x, ws_y: u16,
 	}
 	ws: Winsize
-	linux.ioctl(linux.Fd(1), TIOCGWINSZ, uintptr(rawptr(&ws)))
+	ioctl(c.int(1), c.ulong(TIOCGWINSZ), rawptr(&ws)) // fd 1 = stdout
 	rows = int(ws.ws_row)
 	cols = int(ws.ws_col)
 	if rows < 10 {rows = 30}
 	if cols < 40 {cols = 100}
 	return
 }
-
-TIOCGWINSZ :: 0x5413
 
 // read_key reads one keystroke, decoding the arrow / page escape sequences.
 read_key :: proc() -> Key {

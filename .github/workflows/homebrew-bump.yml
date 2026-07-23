@@ -1,0 +1,40 @@
+name: homebrew-bump
+
+# On a version tag, bump the Homebrew formula in the tap repo (Lvcky-gg/homebrew-tap)
+# to the new release: update its url + sha256 and push the change. Mirrors the AUR
+# deploy, but for Homebrew and tag-driven (releases are versioned tarballs).
+#
+# One-time setup:
+#   1. Create the tap repo `Lvcky-gg/homebrew-tap` with Formula/gjallarhorn.rb
+#      (seed it from packaging/homebrew/gjallarhorn.rb).
+#   2. Add a repo secret HOMEBREW_TAP_TOKEN — a PAT (classic: `repo`, or fine-grained
+#      with Contents: read/write on the tap) so this workflow can push to the tap.
+on:
+  push:
+    tags:
+      - '[0-9]*'
+      - 'v[0-9]*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag/version to bump the formula to (e.g. 1.0.1)"
+        required: true
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Bump gjallarhorn in the tap
+        uses: mislav/bump-homebrew-formula-action@v3
+        with:
+          formula-name: gjallarhorn
+          formula-path: Formula/gjallarhorn.rb
+          homebrew-tap: Lvcky-gg/homebrew-tap
+          tag-name: ${{ github.event.inputs.tag || github.ref_name }}
+          download-url: https://github.com/Lvcky-gg/Gjallarhorn/archive/refs/tags/${{ github.event.inputs.tag || github.ref_name }}.tar.gz
+          commit-message: |
+            gjallarhorn {{version}}
+
+            Automated bump from Lvcky-gg/Gjallarhorn on tag push.
+        env:
+          COMMITTER_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

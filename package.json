@@ -1,5 +1,5 @@
 {
-  "name": "@lvcky/gjallarhorn",
+  "name": "gjallarhorn-git",
   "version": "0.1.0",
   "description": "From-scratch Odin web framework, ORM and template engine, with a nest-style scaffolding CLI (new / run / build / generate / docs).",
   "keywords": [

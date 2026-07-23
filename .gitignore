@@ -2,3 +2,7 @@ gjallarhorn.bin
 # built CLI binary (odin build cli -out:gh)
 /gh
 /.claude
+# npm distribution: compiled CLI + local install noise (built at install time)
+/packaging/npm/build/
+/node_modules/
+npm-debug.log*

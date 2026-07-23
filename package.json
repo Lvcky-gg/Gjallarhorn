@@ -1,0 +1,54 @@
+{
+  "name": "@lvcky/gjallarhorn",
+  "version": "0.1.0",
+  "description": "From-scratch Odin web framework, ORM and template engine, with a nest-style scaffolding CLI (new / run / build / generate / docs).",
+  "keywords": [
+    "odin",
+    "odin-lang",
+    "web-framework",
+    "http-server",
+    "orm",
+    "template-engine",
+    "cli",
+    "scaffolding"
+  ],
+  "homepage": "https://github.com/Lvcky-gg/Gjallarhorn#readme",
+  "bugs": "https://github.com/Lvcky-gg/Gjallarhorn/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Lvcky-gg/Gjallarhorn.git"
+  },
+  "author": "John O'Donnell <mail@johnodonnell.xyz>",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "bin": {
+    "gjallarhorn": "packaging/npm/bin/gjallarhorn.js"
+  },
+  "scripts": {
+    "postinstall": "node packaging/npm/scripts/postinstall.js"
+  },
+  "files": [
+    "cli/",
+    "gjallarhorn/",
+    "packaging/npm/bin/gjallarhorn.js",
+    "packaging/npm/scripts/common.js",
+    "packaging/npm/scripts/postinstall.js",
+    "license.md",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=16"
+  },
+  "os": [
+    "linux",
+    "darwin",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ]
+}

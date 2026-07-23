@@ -32,8 +32,12 @@ jobs:
       - name: Set up Node + the npm registry
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           registry-url: 'https://registry.npmjs.org'
+
+      # Trusted publishing (OIDC) needs a recent npm CLI (>= 11.5.1).
+      - name: Use the latest npm
+        run: npm install -g npm@latest
 
       # Odin isn't needed to *publish* (the package ships source), but the smoke
       # test below compiles a scaffolded app, which needs the compiler.
@@ -66,7 +70,8 @@ jobs:
           echo "publishing $(node -p "require('./package.json').name")@$ver (tag: $GITHUB_REF_NAME)"
           npm version "$ver" --no-git-tag-version --allow-same-version
 
-      - name: Publish to npm (with provenance)
-        run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # Trusted publishing: npm exchanges the workflow's OIDC token (id-token: write,
+      # above) with the registry — no NPM_TOKEN needed. Provenance is automatic.
+      # Requires a trusted publisher configured on npm for this package + workflow.
+      - name: Publish to npm (trusted publishing / OIDC)
+        run: npm publish --access public
